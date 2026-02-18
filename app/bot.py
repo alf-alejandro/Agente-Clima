@@ -88,9 +88,14 @@ class BotRunner:
         self.scan_count += 1
         portfolio = self.portfolio
 
-        # 1. Get current positions (needs lock for a moment)
+        # 1. Get current + closed IDs to avoid re-entering same markets
         with portfolio.lock:
             existing_ids = set(portfolio.positions.keys())
+            closed_ids = {
+                p["condition_id"] for p in portfolio.closed_positions
+                if p.get("condition_id")
+            }
+            existing_ids |= closed_ids
 
         # 2. Scan Polymarket (no lock — external HTTP)
         opportunities = scan_opportunities(existing_ids)
@@ -133,7 +138,7 @@ class BotRunner:
                     continue
 
                 # Priority 1: Kelly sizing
-                amount = self._calc_amount(opp, portfolio.capital_disponible)
+                amount = self._calc_amount(opp, portfolio.capital_disponible, portfolio.capital_total)
                 if amount >= 1:
                     portfolio.open_position(opp, amount)
                     log.info(
@@ -170,8 +175,8 @@ class BotRunner:
 
         return evaluated
 
-    def _calc_amount(self, opp, capital_disponible):
-        """Kelly when AI provides probability, else default 5%."""
+    def _calc_amount(self, opp, capital_disponible, capital_total):
+        """Kelly when AI provides probability, else default 5%. Hard cap: 15% of total capital."""
         true_prob = opp.get("ai_true_prob")
         rec = opp.get("ai_recommendation", "")
 
@@ -182,4 +187,5 @@ class BotRunner:
         else:
             amount = capital_disponible * 0.05  # default 5%
 
-        return min(amount, capital_disponible)
+        hard_cap = capital_total * KELLY_MAX_FRACTION  # 15% of total capital
+        return min(amount, capital_disponible, hard_cap)

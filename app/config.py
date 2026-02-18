@@ -20,7 +20,7 @@ AI_COST_PER_CALL         = float(os.environ.get("AI_COST_PER_CALL", 0.0003))
 
 # --- Kelly position sizing ---
 KELLY_FRACTION_MULTIPLIER = float(os.environ.get("KELLY_FRACTION_MULTIPLIER", 0.25))  # quarter-Kelly
-KELLY_MAX_FRACTION        = float(os.environ.get("KELLY_MAX_FRACTION", 0.20))         # hard cap 20%
+KELLY_MAX_FRACTION        = float(os.environ.get("KELLY_MAX_FRACTION", 0.15))         # hard cap 15% of total capital
 
 # --- Geographic correlation limits ---
 MAX_REGION_EXPOSURE = float(os.environ.get("MAX_REGION_EXPOSURE", 0.25))  # max 25% per region
