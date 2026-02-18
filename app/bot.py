@@ -1,5 +1,6 @@
 import threading
 import logging
+from datetime import datetime, timezone
 
 from app.scanner import scan_opportunities, fetch_live_prices, get_prices, fetch_market_live
 from app.config import (
@@ -44,6 +45,7 @@ class BotRunner:
         self.ai_call_count = 0
         # Serialise AI API calls: only 1 in flight at a time
         self._ai_lock = threading.Lock()
+        self.last_price_update = None   # datetime UTC, updated after each price refresh
         if self.ai_agent_enabled and GEMINI_API_KEY:
             self._init_agent(GEMINI_API_KEY)
 
@@ -102,6 +104,12 @@ class BotRunner:
     def _cycle(self):
         self.scan_count += 1
         portfolio = self.portfolio
+
+        # Watchdog: restart price thread if it crashed
+        if self._price_thread is not None and not self._price_thread.is_alive():
+            log.warning("Price updater thread died — restarting")
+            self._price_thread = threading.Thread(target=self._run_prices, daemon=True)
+            self._price_thread.start()
 
         # 1. Collect IDs to skip (with lock, fast)
         with portfolio.lock:
@@ -189,22 +197,27 @@ class BotRunner:
         log.info("Price updater stopped")
 
     def _refresh_prices(self):
-        """Fetch current NO prices via Gamma API and update open positions.
-        Gamma caches outcomePrices ~2 min — that is the resolution limit of
-        Polymarket's public REST API (real-time requires WebSockets).
-        """
+        """Fetch current YES/NO prices via Gamma API and update open positions."""
         with self.portfolio.lock:
             slugs = self.portfolio.get_position_slugs()
 
+        updated = 0
         for cid, slug in slugs:
             if self._stop_event.is_set():
                 return
-            _, no_p = fetch_live_prices(slug)
+            yes_p, no_p = fetch_live_prices(slug)
             if no_p is None:
                 continue
             with self.portfolio.lock:
                 if cid in self.portfolio.positions:
+                    old = self.portfolio.positions[cid]["current_no"]
                     self.portfolio.positions[cid]["current_no"] = no_p
+                    if abs(no_p - old) >= 0.001:
+                        log.info("Price update %s: %.4f -> %.4f", slug[:35], old, no_p)
+                    updated += 1
+
+        if updated > 0 or not slugs:
+            self.last_price_update = datetime.now(timezone.utc)
 
     # ── AI take-profit loop (every AI_SCAN_INTERVAL seconds) ──────────────────
     # Waits first, then evaluates open positions one-by-one, serialised.

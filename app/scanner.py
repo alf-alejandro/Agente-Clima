@@ -62,7 +62,10 @@ def build_event_slug(city, date):
 
 def fetch_event_by_slug(slug):
     try:
-        r = requests.get(f"{GAMMA}/events", params={"slug": slug, "limit": 1}, timeout=10)
+        r = requests.get(
+            f"{GAMMA}/events", params={"slug": slug, "limit": 1},
+            timeout=(5, 8),   # (connect_timeout, read_timeout)
+        )
         if r.status_code == 200:
             data = r.json()
             if isinstance(data, list) and data:
@@ -74,7 +77,10 @@ def fetch_event_by_slug(slug):
 
 def fetch_market_live(slug):
     try:
-        r = requests.get(f"{GAMMA}/markets", params={"slug": slug, "limit": 1}, timeout=10)
+        r = requests.get(
+            f"{GAMMA}/markets", params={"slug": slug, "limit": 1},
+            timeout=(5, 8),   # (connect_timeout, read_timeout)
+        )
         if r.status_code == 200:
             data = r.json()
             if isinstance(data, list) and data:

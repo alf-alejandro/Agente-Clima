@@ -29,6 +29,11 @@ def api_status():
     snap["ai_agent_enabled"] = bot.ai_agent_enabled if bot else False
     snap["ai_call_count"] = bot.ai_call_count if bot else 0
     snap["ai_cost_total"] = round(bot.ai_call_count * AI_COST_PER_CALL, 4) if bot else 0
+    lpu = bot.last_price_update if bot else None
+    snap["last_price_update"] = lpu.isoformat() if lpu else None
+    snap["price_thread_alive"] = (
+        bot._price_thread is not None and bot._price_thread.is_alive()
+    ) if bot else False
     return jsonify(snap)
 
 

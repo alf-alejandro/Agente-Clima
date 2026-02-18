@@ -100,6 +100,11 @@ function updateUI(data) {
     $id("btn-agent-on").classList.toggle("hidden", agentOn);
     $id("btn-agent-off").classList.toggle("hidden", !agentOn);
 
+    // Price freshness
+    lastPriceUpdateISO = data.last_price_update || null;
+    priceThreadAlive   = data.price_thread_alive ?? true;
+    updatePriceBadge();
+
     // Insights panel
     updateInsights(data.insights);
 
@@ -270,6 +275,44 @@ async function stopBot() {
     await fetch("/api/bot/stop", { method: "POST" });
     fetchStatus();
 }
+
+// --- Price freshness badge ---
+let lastPriceUpdateISO = null;
+let priceThreadAlive = false;
+
+function updatePriceBadge() {
+    const dot = $id("price-badge-dot");
+    const txt = $id("price-badge-txt");
+    const badge = $id("price-badge");
+
+    if (!lastPriceUpdateISO) {
+        badge.className = "flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full bg-gray-700 text-gray-400";
+        dot.className = "w-1.5 h-1.5 rounded-full bg-gray-500";
+        txt.textContent = "Precios: sin datos";
+        return;
+    }
+
+    const secAgo = Math.round((Date.now() - new Date(lastPriceUpdateISO).getTime()) / 1000);
+    txt.textContent = "Precios: hace " + secAgo + "s";
+
+    if (!priceThreadAlive) {
+        badge.className = "flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full bg-red-900/60 text-red-300";
+        dot.className = "w-1.5 h-1.5 rounded-full bg-red-400";
+        txt.textContent = "Precios: hilo caído " + secAgo + "s";
+    } else if (secAgo < 60) {
+        badge.className = "flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full bg-emerald-900/60 text-emerald-300";
+        dot.className = "w-1.5 h-1.5 rounded-full bg-emerald-400 pulse-dot";
+    } else if (secAgo < 120) {
+        badge.className = "flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full bg-yellow-900/60 text-yellow-300";
+        dot.className = "w-1.5 h-1.5 rounded-full bg-yellow-400";
+    } else {
+        badge.className = "flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full bg-red-900/60 text-red-300";
+        dot.className = "w-1.5 h-1.5 rounded-full bg-red-400";
+    }
+}
+
+// Tick badge every second (local, no server needed)
+setInterval(updatePriceBadge, 1000);
 
 // Initial fetch + interval
 fetchStatus();
