@@ -85,29 +85,42 @@ def fetch_market_live(slug):
 
 
 def fetch_clob_midpoint(token_id):
-    """Fetch real-time mid-point price from the CLOB API (no cache).
-    Returns float price or None on failure.
+    """Fetch real-time last-trade price from CLOB API (no server-side cache).
+
+    Strategy (confirmed working against clob.polymarket.com):
+      1. GET /book  → read 'last_trade_price' field  (one call, richest data)
+      2. GET /last-trade-price → read 'price' field  (lighter fallback)
+    The /mid-point endpoint does NOT exist (returns 404).
     """
     if not token_id:
         return None
+
+    # Primary: /book includes last_trade_price in its payload
     try:
-        r = requests.get(
-            f"{CLOB}/mid-point",
-            params={"token_id": token_id},
-            timeout=8,
-        )
+        r = requests.get(f"{CLOB}/book", params={"token_id": token_id}, timeout=8)
         if r.status_code == 200:
-            data = r.json()
-            price = data.get("mid")
+            price = r.json().get("last_trade_price")
             if price is not None:
                 return float(price)
-    except Exception:
-        log.debug("CLOB mid-point failed for token %s", token_id)
+    except Exception as e:
+        log.debug("CLOB /book failed token=%s: %s", token_id[:16], e)
+
+    # Secondary: dedicated last-trade-price endpoint
+    try:
+        r = requests.get(f"{CLOB}/last-trade-price", params={"token_id": token_id}, timeout=8)
+        if r.status_code == 200:
+            price = r.json().get("price")
+            if price is not None:
+                return float(price)
+    except Exception as e:
+        log.debug("CLOB /last-trade-price failed token=%s: %s", token_id[:16], e)
+
+    log.warning("CLOB failed for token %s...; Gamma fallback will be used", token_id[:16])
     return None
 
 
 def fetch_clob_prices(yes_token_id, no_token_id):
-    """Fetch real-time YES and NO prices from CLOB. Falls back to None on error."""
+    """Fetch real-time YES and NO prices from CLOB. Returns (yes_p, no_p)."""
     yes_p = fetch_clob_midpoint(yes_token_id)
     no_p  = fetch_clob_midpoint(no_token_id)
     return yes_p, no_p
