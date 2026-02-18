@@ -116,21 +116,20 @@ def fetch_no_price_clob(no_token_id):
             return None, None
         data = r.json()
 
-        # Use live order book (bids/asks) — much more current than last_trade_price
+        # Use best ASK (lowest ask) = "Buy No" price shown on Polymarket website.
+        # This matches what users see on the UI and reflects what buyers currently pay.
         bids = data.get("bids") or []
         asks = data.get("asks") or []
 
         no_price = None
-        if bids and asks:
-            best_bid = max(float(b["price"]) for b in bids)
-            best_ask = min(float(a["price"]) for a in asks)
-            no_price = (best_bid + best_ask) / 2.0
-        elif bids:
-            no_price = max(float(b["price"]) for b in bids)
-        elif asks:
+        if asks:
+            # Best ask = lowest price at which someone will sell NO tokens
             no_price = min(float(a["price"]) for a in asks)
+        elif bids:
+            # No sellers — use best bid as conservative estimate
+            no_price = max(float(b["price"]) for b in bids)
         else:
-            # Only fall back to last_trade_price if order book is completely empty
+            # Empty order book — last_trade_price (may be stale, last resort)
             ltp = data.get("last_trade_price")
             if ltp:
                 no_price = float(ltp)

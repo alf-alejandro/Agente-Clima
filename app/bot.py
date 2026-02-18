@@ -147,25 +147,71 @@ class BotRunner:
                 (cid, pos.get("no_token_id"), pos.get("slug"))
                 for cid, pos in portfolio.positions.items()
             ]
+            open_count = len(portfolio.positions)
 
         price_map = {}
+        clob_ok_cycle = True
+        clob_fail_cycle = 0
         for cid, no_tid, slug in pos_data:
             if self._stop_event.is_set():
                 return
-            yes_p, no_p = fetch_no_price_clob(no_tid)
-            # Sanity: if CLOB returns < 0.50 it likely gave us the YES token price
-            if no_p is not None and no_p < 0.50:
-                log.warning("CLOB sanity fail %.3f for %s — Gamma fallback", no_p, slug[:25])
-                yes_p, no_p = None, None
+            yes_p, no_p = None, None
+            if clob_ok_cycle:
+                yes_p, no_p = fetch_no_price_clob(no_tid)
+                if no_p is not None and no_p < 0.50:
+                    log.warning("CLOB sanity fail %.3f for %s — Gamma fallback", no_p, slug[:25])
+                    yes_p, no_p = None, None
+                if no_p is None:
+                    clob_fail_cycle += 1
+                    if clob_fail_cycle >= 2:
+                        clob_ok_cycle = False
             if no_p is None:
                 yes_p, no_p = fetch_live_prices(slug)
             if yes_p is not None and no_p is not None:
                 price_map[cid] = (yes_p, no_p)
 
+        # 4b. Verify real-time entry price for candidate opportunities (outside lock).
+        # Only check as many as the portfolio has room for — avoids verifying 15+
+        # markets when there is only capacity for 1-2 more positions.
+        from app.config import MAX_POSITIONS
+        slots_available = max(0, MAX_POSITIONS - open_count)
+        candidates = opportunities[:max(slots_available, 1)]  # at least check 1
+
+        verified_opps = []
+        clob_entry_ok = True
+        clob_entry_fails = 0
+        for opp in candidates:
+            if self._stop_event.is_set():
+                return
+            no_tid = opp.get("no_token_id")
+            rt_yes, rt_no = None, None
+            if clob_entry_ok and no_tid:
+                rt_yes, rt_no = fetch_no_price_clob(no_tid)
+                # Sanity: wrong token ID → discard
+                if rt_no is not None and rt_no < 0.50:
+                    rt_yes, rt_no = None, None
+                if rt_no is None:
+                    clob_entry_fails += 1
+                    if clob_entry_fails >= 2:
+                        clob_entry_ok = False
+
+            if rt_no is not None:
+                # Price out of entry range → skip this opportunity
+                if not (MIN_NO_PRICE <= rt_no <= MAX_NO_PRICE):
+                    log.info(
+                        "Entry skip %s — CLOB price %.1f¢ out of range",
+                        opp["question"][:35], rt_no * 100,
+                    )
+                    continue
+                # Update with real-time price so position opens at correct price
+                opp = {**opp, "no_price": rt_no, "yes_price": rt_yes or round(1 - rt_no, 4)}
+                log.info("Entry price verified via CLOB: %.1f¢", rt_no * 100)
+            verified_opps.append(opp)
+
         # 5. Portfolio operations (with lock — fast, no HTTP inside)
         with portfolio.lock:
             # Enter new positions (no AI gate)
-            for opp in opportunities:
+            for opp in verified_opps:
                 if not portfolio.can_open_position():
                     break
                 city = opp.get("city", "")
