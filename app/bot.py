@@ -153,6 +153,10 @@ class BotRunner:
             if self._stop_event.is_set():
                 return
             yes_p, no_p = fetch_no_price_clob(no_tid)
+            # Sanity: if CLOB returns < 0.50 it likely gave us the YES token price
+            if no_p is not None and no_p < 0.50:
+                log.warning("CLOB sanity fail %.3f for %s — Gamma fallback", no_p, slug[:25])
+                yes_p, no_p = None, None
             if no_p is None:
                 yes_p, no_p = fetch_live_prices(slug)
             if yes_p is not None and no_p is not None:
@@ -230,13 +234,25 @@ class BotRunner:
             if clob_ok and no_tid:
                 yes_p, no_p = fetch_no_price_clob(no_tid)
                 if no_p is not None:
-                    source = "CLOB"
-                    clob_failures = 0
+                    # Sanity: our NO positions are always entered at > 0.88.
+                    # If CLOB returns < 0.50, we likely got the YES token price
+                    # (clobTokenIds ordering varies per market). Discard it.
+                    if no_p < 0.50:
+                        log.warning(
+                            "CLOB returned %.3f for NO token (likely YES token) — Gamma fallback",
+                            no_p,
+                        )
+                        yes_p, no_p = None, None
+                        clob_failures += 1
+                    else:
+                        source = "CLOB"
+                        clob_failures = 0
                 else:
                     clob_failures += 1
-                    if clob_failures >= 2:
-                        clob_ok = False
-                        log.warning("CLOB unavailable — using Gamma for remaining positions")
+
+                if clob_failures >= 2:
+                    clob_ok = False
+                    log.warning("CLOB unreliable — using Gamma for remaining positions")
 
             if no_p is None:
                 yes_p, no_p = fetch_live_prices(slug)

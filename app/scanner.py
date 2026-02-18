@@ -101,8 +101,8 @@ def fetch_live_prices(slug):
 def fetch_no_price_clob(no_token_id):
     """Fetch real-time NO price from CLOB order book (no cache).
 
-    Uses the NO token ID stored on each position.  Returns (yes_price, no_price)
-    or (None, None) on failure.  Falls back gracefully so Gamma can be used instead.
+    Uses live bids/asks mid-price — NOT last_trade_price which can be stale.
+    Falls back gracefully so Gamma can be used instead on any failure.
     """
     if not no_token_id:
         return None, None
@@ -116,16 +116,24 @@ def fetch_no_price_clob(no_token_id):
             return None, None
         data = r.json()
 
-        # Prefer last_trade_price; fall back to best bid in the order book
-        no_price = None
-        ltp = data.get("last_trade_price")
-        if ltp:
-            no_price = float(ltp)
+        # Use live order book (bids/asks) — much more current than last_trade_price
+        bids = data.get("bids") or []
+        asks = data.get("asks") or []
 
-        if no_price is None:
-            bids = data.get("bids") or []
-            if bids:
-                no_price = max(float(b["price"]) for b in bids)
+        no_price = None
+        if bids and asks:
+            best_bid = max(float(b["price"]) for b in bids)
+            best_ask = min(float(a["price"]) for a in asks)
+            no_price = (best_bid + best_ask) / 2.0
+        elif bids:
+            no_price = max(float(b["price"]) for b in bids)
+        elif asks:
+            no_price = min(float(a["price"]) for a in asks)
+        else:
+            # Only fall back to last_trade_price if order book is completely empty
+            ltp = data.get("last_trade_price")
+            if ltp:
+                no_price = float(ltp)
 
         if no_price is None or not (0.0 < no_price < 1.0):
             return None, None
