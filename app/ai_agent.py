@@ -8,38 +8,41 @@ from google.genai import types
 
 log = logging.getLogger(__name__)
 
-PROMPT = """\
+POSITION_PROMPT = """\
 You are a weather prediction market analyst with access to real-time data.
 
-Analyze this Polymarket weather market:
+I currently hold a NO position on this Polymarket weather market:
 - City: {city}
 - Date: {date}
 - Question: {question}
-- NO price: {no_price:.2f}  →  market implies {no_pct:.0f}% probability NO resolves
-- YES price: {yes_price:.2f}
+- Entry NO price: {entry_no:.2f}  ({entry_no_pct:.0f}% implied probability NO)
+- Current NO price: {current_no:.2f}  ({current_no_pct:.0f}%)
+- Unrealized P&L: {pnl_sign}${pnl_abs:.2f}
+
+My position profits if NO resolves (temperature does NOT exceed the threshold).
 
 Steps:
-1. Search for today's weather forecast for {city} on {date}
+1. Search for the LATEST weather forecast for {city} on {date}
 2. Identify the temperature threshold from the question
-3. Estimate the TRUE meteorological probability that NO resolves
-   (i.e. temperature does NOT exceed the threshold)
-4. Compare your estimate to the market's {no_pct:.0f}% implied probability
+3. Assess the current probability that temperature will NOT exceed the threshold
+4. Decide: EXIT now or HOLD until resolution?
+
+EXIT if the forecast now clearly shows temperature will exceed the threshold
+   (position likely to lose — cut losses early).
+EXIT if NO price has risen to near 0.97+ and most profit is already captured
+   (lock in gains, reduce tail risk).
+HOLD if forecast still strongly supports NO resolution and position has value.
 
 Respond with ONLY valid JSON — no markdown, no explanation:
 {{
   "forecast_high": <expected high as number, null if unavailable>,
   "unit": "F" or "C",
   "threshold": <threshold from the question as number>,
-  "true_prob_no": <your estimate 0.00 to 1.00>,
-  "recommendation": "ENTER" or "REDUCE" or "SKIP",
+  "true_prob_no": <your current estimate 0.00 to 1.00>,
+  "recommendation": "EXIT" or "HOLD",
   "reasoning": "<one sentence, max 15 words>",
   "data_quality": "HIGH" or "MEDIUM" or "LOW"
 }}
-
-Recommendation rules:
-- ENTER:  true_prob_no > {no_price:.2f} + 0.03  (clear positive edge)
-- REDUCE: true_prob_no > {no_price:.2f} but edge < 0.03  (marginal, size down)
-- SKIP:   true_prob_no <= {no_price:.2f}  (no edge or adverse — avoid)
 """
 
 
@@ -48,38 +51,47 @@ class WeatherAgent:
         self.client = genai.Client(api_key=api_key)
         self.model = model
 
-    def evaluate(self, opp):
-        """
-        Evaluate a single opportunity.
-        Returns dict or None on failure.
+    # ── Take-profit evaluation (primary use) ───────────────────────────────────
+
+    def evaluate_position(self, pos):
+        """Evaluate an open position for EXIT/HOLD take-profit decision.
+        Returns dict with 'recommendation': 'EXIT' or 'HOLD', or None on failure.
         """
         try:
-            prompt = self._build_prompt(opp)
+            prompt = self._build_position_prompt(pos)
             raw = self._call_gemini(prompt)
             result = self._parse_json(raw)
             if result:
                 log.info(
-                    "AI: %s → %s (true=%.2f mkt=%.2f)",
-                    opp.get("question", "")[:45],
+                    "AI pos: %s → %s (true=%.2f current_no=%.2f)",
+                    pos.get("question", "")[:45],
                     result.get("recommendation"),
                     result.get("true_prob_no", 0),
-                    opp["no_price"],
+                    pos.get("current_no", 0),
                 )
             return result
         except Exception:
-            log.exception("AI eval failed: %s", opp.get("question", "")[:45])
+            log.exception("AI position eval failed: %s", pos.get("question", "")[:45])
             return None
 
-    def _build_prompt(self, opp):
-        city = opp.get("city", "unknown").replace("-", " ").title()
+    def _build_position_prompt(self, pos):
+        city = pos.get("city", "unknown").replace("-", " ").title()
         date = datetime.now(timezone.utc).strftime("%B %d, %Y")
-        return PROMPT.format(
+        entry_no = pos.get("entry_no", 0)
+        current_no = pos.get("current_no", entry_no)
+        allocated = pos.get("allocated", 0)
+        tokens = pos.get("tokens", 0)
+        pnl = tokens * current_no - allocated
+        return POSITION_PROMPT.format(
             city=city,
             date=date,
-            question=opp.get("question", ""),
-            no_price=opp["no_price"],
-            no_pct=opp["no_price"] * 100,
-            yes_price=opp["yes_price"],
+            question=pos.get("question", ""),
+            entry_no=entry_no,
+            entry_no_pct=entry_no * 100,
+            current_no=current_no,
+            current_no_pct=current_no * 100,
+            pnl_sign="+" if pnl >= 0 else "-",
+            pnl_abs=abs(pnl),
         )
 
     def _call_gemini(self, prompt):

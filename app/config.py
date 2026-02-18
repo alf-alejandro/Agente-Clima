@@ -17,10 +17,14 @@ STOP_LOSS_ENABLED = os.environ.get("STOP_LOSS_ENABLED", "true").lower() == "true
 GEMINI_API_KEY           = os.environ.get("GEMINI_API_KEY", "")
 AI_AGENT_ENABLED         = os.environ.get("AI_AGENT_ENABLED", "true").lower() == "true"
 AI_COST_PER_CALL         = float(os.environ.get("AI_COST_PER_CALL", 0.0003))
+AI_SCAN_INTERVAL         = int(os.environ.get("AI_SCAN_INTERVAL", 1800))   # 30 min between AI take-profit sweeps
 
-# --- Kelly position sizing ---
-KELLY_FRACTION_MULTIPLIER = float(os.environ.get("KELLY_FRACTION_MULTIPLIER", 0.25))  # quarter-Kelly
-KELLY_MAX_FRACTION        = float(os.environ.get("KELLY_MAX_FRACTION", 0.15))         # hard cap 15% of total capital
+# --- Position sizing (5 % – 10 % of total capital, scaled by NO price) ---
+POSITION_SIZE_MIN = float(os.environ.get("POSITION_SIZE_MIN", 0.05))  # 5 %
+POSITION_SIZE_MAX = float(os.environ.get("POSITION_SIZE_MAX", 0.10))  # 10 %
+
+# --- Price update thread ---
+PRICE_UPDATE_INTERVAL = int(os.environ.get("PRICE_UPDATE_INTERVAL", 15))  # seconds
 
 # --- Geographic correlation limits ---
 MAX_REGION_EXPOSURE = float(os.environ.get("MAX_REGION_EXPOSURE", 0.25))  # max 25% per region

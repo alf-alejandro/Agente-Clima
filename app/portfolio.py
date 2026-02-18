@@ -52,18 +52,19 @@ class AutoPortfolio:
         self.capital_disponible -= amount
         return True
 
-    def update_positions(self):
+    def get_position_slugs(self):
+        """Return [(cid, slug), ...] for live-price fetching. Safe to call without lock."""
+        return [(cid, pos["slug"]) for cid, pos in self.positions.items()]
+
+    def apply_price_updates(self, price_map):
+        """Apply pre-fetched {cid: (yes_price, no_price)} and close resolved/stopped positions.
+        Must be called with self.lock held."""
         to_close = []
 
-        for cid, pos in list(self.positions.items()):
-            m = fetch_market_live(pos["slug"])
-            if not m:
+        for cid, (yes_price, no_price) in price_map.items():
+            if cid not in self.positions:
                 continue
-
-            yes_price, no_price = get_prices(m)
-            if yes_price is None or no_price is None:
-                continue
-
+            pos = self.positions[cid]
             pos["current_no"] = no_price
 
             if yes_price >= 0.99:
@@ -77,11 +78,29 @@ class AutoPortfolio:
                 if drop <= pos["stop_trigger"]:
                     sale_value = pos["tokens"] * no_price
                     realized_loss = sale_value - pos["allocated"]
-                    resolution = f"Stop loss @ NO={no_price*100:.1f}¢ (entrada {pos['entry_no']*100:.1f}¢, caída {drop*100:.1f}¢)"
+                    resolution = (
+                        f"Stop loss @ NO={no_price*100:.1f}¢ "
+                        f"(entrada {pos['entry_no']*100:.1f}¢, caída {drop*100:.1f}¢)"
+                    )
                     to_close.append((cid, "STOPPED", realized_loss, resolution))
 
         for cid, status, pnl, resolution in to_close:
             self._close_position(cid, status, pnl, resolution)
+
+    def update_positions(self):
+        """Legacy helper: fetch prices and apply.  WARNING — does HTTP; do NOT call while
+        holding self.lock.  Prefer get_position_slugs() + apply_price_updates()."""
+        slugs = self.get_position_slugs()
+        price_map = {}
+        for cid, slug in slugs:
+            m = fetch_market_live(slug)
+            if not m:
+                continue
+            yes_price, no_price = get_prices(m)
+            if yes_price is not None and no_price is not None:
+                price_map[cid] = (yes_price, no_price)
+        if price_map:
+            self.apply_price_updates(price_map)
 
     def _close_position(self, cid, status, pnl, resolution=""):
         if cid not in self.positions:
