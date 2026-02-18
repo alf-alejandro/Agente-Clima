@@ -146,6 +146,23 @@ class AutoPortfolio:
         self.capital_disponible += cost_fraction + realized_pnl
         self.capital_total += realized_pnl
 
+        # Record so the dashboard shows this as a traceable P&L event
+        self.closed_positions.append({
+            "question": pos["question"],
+            "city": pos.get("city", ""),
+            "condition_id": cid,
+            "entry_no": pos["entry_no"],
+            "allocated": round(cost_fraction, 2),
+            "pnl": round(realized_pnl, 2),
+            "status": "PARTIAL",
+            "resolution": (
+                f"Salida parcial 50% @ NO={pos['current_no'] * 100:.1f}¢ "
+                f"— {int(PARTIAL_EXIT_THRESHOLD * 100)}% ganancia capturada"
+            ),
+            "entry_time": pos["entry_time"],
+            "close_time": now_utc().isoformat(),
+        })
+
     # ── Region exposure ───────────────────────────────────────────────────────
 
     def get_region_allocated(self, region):
@@ -163,7 +180,8 @@ class AutoPortfolio:
     # ── Learning insights ─────────────────────────────────────────────────────
 
     def compute_insights(self):
-        closed = self.closed_positions
+        # Exclude partial exits from win-rate insights — they aren't resolved bets
+        closed = [p for p in self.closed_positions if p["status"] != "PARTIAL"]
         if len(closed) < 5:
             return None
 
@@ -221,9 +239,11 @@ class AutoPortfolio:
         pnl = self.capital_total - self.capital_inicial
         roi = (pnl / self.capital_inicial * 100) if self.capital_inicial else 0
 
-        won = sum(1 for p in self.closed_positions if p["pnl"] > 0)
-        lost = sum(1 for p in self.closed_positions if p["pnl"] < 0)
+        # Exclude PARTIAL entries from won/lost — they're not resolved positions
+        won = sum(1 for p in self.closed_positions if p["pnl"] > 0 and p["status"] != "PARTIAL")
+        lost = sum(1 for p in self.closed_positions if p["pnl"] <= 0 and p["status"] != "PARTIAL")
         stopped = sum(1 for p in self.closed_positions if p["status"] == "STOPPED")
+        partial = sum(1 for p in self.closed_positions if p["status"] == "PARTIAL")
 
         open_positions = []
         for pos in list(self.positions.values()):
@@ -262,6 +282,7 @@ class AutoPortfolio:
             "won": won,
             "lost": lost,
             "stopped": stopped,
+            "partial": partial,
             "open_positions": open_positions,
             "closed_positions": closed,
             "capital_history": self.capital_history,

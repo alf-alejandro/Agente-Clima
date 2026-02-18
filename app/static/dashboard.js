@@ -79,7 +79,9 @@ function updateUI(data) {
     roiEl.textContent = pnlSign(data.roi) + data.roi.toFixed(2) + "%";
     roiEl.className = "text-xl font-bold mt-1 " + pnlColor(data.roi);
 
-    $id("m-wl").textContent = data.won + " / " + data.lost + (data.stopped ? " (" + data.stopped + " SL)" : "");
+    $id("m-wl").textContent = data.won + " / " + data.lost +
+        (data.stopped ? " · " + data.stopped + " SL" : "") +
+        (data.partial ? " · " + data.partial + "P" : "");
     $id("m-scans").textContent = data.scan_count;
     $id("m-ai-calls").textContent = data.ai_call_count ?? 0;
     $id("m-ai-cost").textContent = "$" + (data.ai_cost_total ?? 0).toFixed(4);
@@ -163,8 +165,9 @@ function updateUI(data) {
     } else {
         $id("no-closed").classList.add("hidden");
         closedTb.innerHTML = closed.map(c => {
-            const statusColor = c.status === "WON" ? "text-emerald-400" :
-                                c.status === "STOPPED" ? "text-yellow-400" : "text-red-400";
+            const statusColor = c.status === "WON"     ? "text-emerald-400" :
+                                c.status === "PARTIAL" ? "text-cyan-400"    :
+                                c.status === "STOPPED" ? "text-yellow-400"  : "text-red-400";
             return `
                 <tr class="border-b border-gray-800">
                     <td class="q py-2 pr-3">${esc(c.question)}</td>
