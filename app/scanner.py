@@ -1,11 +1,11 @@
 import requests
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from app.config import (
     GAMMA, WEATHER_CITIES, MIN_NO_PRICE, MAX_NO_PRICE,
-    MAX_YES_PRICE, MIN_VOLUME, MIN_PROFIT_CENTS,
+    MAX_YES_PRICE, MIN_VOLUME, MIN_PROFIT_CENTS, SCAN_DAYS_AHEAD,
 )
 
 CLOB = "https://clob.polymarket.com"
@@ -146,63 +146,64 @@ def fetch_no_price_clob(no_token_id):
 
 
 def scan_opportunities(existing_ids=None):
-    """Scan for NO-side weather opportunities, excluding already-held IDs."""
+    """Scan for NO-side weather opportunities across today + SCAN_DAYS_AHEAD days."""
     if existing_ids is None:
         existing_ids = set()
 
     today = now_utc().date()
+    scan_dates = [today + timedelta(days=d) for d in range(SCAN_DAYS_AHEAD + 1)]
     opportunities = []
 
-    for city in WEATHER_CITIES:
-        slug = build_event_slug(city, today)
-        event = fetch_event_by_slug(slug)
-        if not event:
-            continue
-
-        for m in (event.get("markets") or []):
-            condition_id = m.get("conditionId")
-            if condition_id in existing_ids:
+    for scan_date in scan_dates:
+        for city in WEATHER_CITIES:
+            slug = build_event_slug(city, scan_date)
+            event = fetch_event_by_slug(slug)
+            if not event:
                 continue
 
-            yes_price, no_price = get_prices(m)
-            if yes_price is None or no_price is None:
-                continue
+            for m in (event.get("markets") or []):
+                condition_id = m.get("conditionId")
+                if condition_id in existing_ids:
+                    continue
 
-            volume = parse_price(m.get("volume") or 0) or 0
-            if volume < MIN_VOLUME:
-                continue
+                yes_price, no_price = get_prices(m)
+                if yes_price is None or no_price is None:
+                    continue
 
-            if not (MIN_NO_PRICE <= no_price <= MAX_NO_PRICE and yes_price <= MAX_YES_PRICE):
-                continue
+                volume = parse_price(m.get("volume") or 0) or 0
+                if volume < MIN_VOLUME:
+                    continue
 
-            profit = (1.0 - no_price) * 100
-            if profit < MIN_PROFIT_CENTS:
-                continue
+                if not (MIN_NO_PRICE <= no_price <= MAX_NO_PRICE and yes_price <= MAX_YES_PRICE):
+                    continue
 
-            end_dt = parse_date(m.get("endDate"))
-            # endDate is stored as midnight UTC of the market day.
-            # Skip only if the market date is strictly before today.
-            if end_dt and end_dt.date() < today:
-                continue
+                profit = (1.0 - no_price) * 100
+                if profit < MIN_PROFIT_CENTS:
+                    continue
 
-            raw_ids = m.get("clobTokenIds") or "[]"
-            clob_ids = json.loads(raw_ids) if isinstance(raw_ids, str) else raw_ids
-            yes_token_id = clob_ids[0] if len(clob_ids) > 0 else None
-            no_token_id  = clob_ids[1] if len(clob_ids) > 1 else None
+                end_dt = parse_date(m.get("endDate"))
+                # Skip markets strictly in the past
+                if end_dt and end_dt.date() < today:
+                    continue
 
-            opportunities.append({
-                "condition_id": condition_id,
-                "city": city,
-                "question": m.get("question", ""),
-                "yes_price": yes_price,
-                "no_price": no_price,
-                "volume": volume,
-                "end_date": end_dt.isoformat() if end_dt else None,
-                "slug": m.get("slug", ""),
-                "profit_cents": round(profit, 1),
-                "yes_token_id": yes_token_id,
-                "no_token_id": no_token_id,
-            })
+                raw_ids = m.get("clobTokenIds") or "[]"
+                clob_ids = json.loads(raw_ids) if isinstance(raw_ids, str) else raw_ids
+                yes_token_id = clob_ids[0] if len(clob_ids) > 0 else None
+                no_token_id  = clob_ids[1] if len(clob_ids) > 1 else None
+
+                opportunities.append({
+                    "condition_id": condition_id,
+                    "city": city,
+                    "question": m.get("question", ""),
+                    "yes_price": yes_price,
+                    "no_price": no_price,
+                    "volume": volume,
+                    "end_date": end_dt.isoformat() if end_dt else None,
+                    "slug": m.get("slug", ""),
+                    "profit_cents": round(profit, 1),
+                    "yes_token_id": yes_token_id,
+                    "no_token_id": no_token_id,
+                })
 
     opportunities.sort(key=lambda x: x["no_price"], reverse=True)
     return opportunities
