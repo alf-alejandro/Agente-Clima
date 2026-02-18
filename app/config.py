@@ -10,7 +10,7 @@ MONITOR_INTERVAL  = int(os.environ.get("MONITOR_INTERVAL", 30))
 MAX_POSITIONS     = int(os.environ.get("MAX_POSITIONS", 20))
 MAX_HOURS_TO_CLOSE = int(os.environ.get("MAX_HOURS_TO_CLOSE", 8))
 
-STOP_LOSS_TRIGGER = float(os.environ.get("STOP_LOSS_TRIGGER", -0.10))
+STOP_LOSS_RATIO   = float(os.environ.get("STOP_LOSS_RATIO", 0.8))   # stop = max_gain * ratio
 STOP_LOSS_ENABLED = os.environ.get("STOP_LOSS_ENABLED", "true").lower() == "true"
 
 # --- Capital ---

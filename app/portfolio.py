@@ -1,6 +1,6 @@
 import threading
 from app.scanner import now_utc, fetch_market_live, get_prices
-from app.config import MAX_POSITIONS, STOP_LOSS_TRIGGER, STOP_LOSS_ENABLED
+from app.config import MAX_POSITIONS, STOP_LOSS_RATIO, STOP_LOSS_ENABLED
 
 
 class AutoPortfolio:
@@ -24,7 +24,9 @@ class AutoPortfolio:
         tokens = amount / opp["no_price"]
         max_gain = tokens * 1.0 - amount
 
-        stop_price = opp["no_price"] + STOP_LOSS_TRIGGER
+        # Dynamic stop: risk at most STOP_LOSS_RATIO * max_gain (R:R stays constant)
+        dynamic_trigger = -(1.0 - opp["no_price"]) * STOP_LOSS_RATIO
+        stop_price = opp["no_price"] + dynamic_trigger
         stop_value = tokens * stop_price
         stop_loss = stop_value - amount
 
@@ -37,6 +39,7 @@ class AutoPortfolio:
             "tokens": tokens,
             "max_gain": max_gain,
             "stop_loss": stop_loss,
+            "stop_trigger": dynamic_trigger,
             "status": "OPEN",
             "pnl": 0.0,
         }
@@ -64,7 +67,7 @@ class AutoPortfolio:
                 to_close.append((cid, "WON", pos["max_gain"]))
             elif STOP_LOSS_ENABLED:
                 drop = no_price - pos["entry_no"]
-                if drop <= STOP_LOSS_TRIGGER:
+                if drop <= pos["stop_trigger"]:
                     sale_value = pos["tokens"] * no_price
                     realized_loss = sale_value - pos["allocated"]
                     to_close.append((cid, "STOPPED", realized_loss))
