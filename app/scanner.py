@@ -115,7 +115,9 @@ def scan_opportunities(existing_ids=None):
                 continue
 
             end_dt = parse_date(m.get("endDate"))
-            if end_dt and (now_utc() - end_dt).total_seconds() > 0:
+            # endDate is stored as midnight UTC of the market day.
+            # Skip only if the market date is strictly before today.
+            if end_dt and end_dt.date() < today:
                 continue
 
             opportunities.append({
