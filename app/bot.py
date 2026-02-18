@@ -1,10 +1,7 @@
 import threading
 import logging
 
-from app.scanner import (
-    scan_opportunities, fetch_market_live, get_prices,
-    fetch_clob_prices, fetch_clob_midpoint,
-)
+from app.scanner import scan_opportunities, fetch_live_prices, get_prices, fetch_market_live
 from app.config import (
     MONITOR_INTERVAL, GEMINI_API_KEY, AI_AGENT_ENABLED,
     AI_COST_PER_CALL, POSITION_SIZE_MIN, POSITION_SIZE_MAX,
@@ -133,26 +130,15 @@ class BotRunner:
             for o in opportunities[:20]
         ]
 
-        # 4. Fetch live prices for open positions via CLOB (real-time, no cache)
-        #    Falls back to Gamma API if token IDs are missing.
+        # 4. Fetch current prices for open positions (Gamma API, ~2 min cache)
         with portfolio.lock:
-            positions_meta = [
-                (cid, pos.get("yes_token_id"), pos.get("no_token_id"), pos.get("slug"))
-                for cid, pos in portfolio.positions.items()
-            ]
+            slugs = portfolio.get_position_slugs()
 
         price_map = {}
-        for cid, yes_tid, no_tid, slug in positions_meta:
+        for cid, slug in slugs:
             if self._stop_event.is_set():
                 return
-            yes_p, no_p = None, None
-            if yes_tid and no_tid:
-                yes_p, no_p = fetch_clob_prices(yes_tid, no_tid)
-            if yes_p is None or no_p is None:
-                # Fallback: Gamma API (may be ~2 min cached)
-                m = fetch_market_live(slug)
-                if m:
-                    yes_p, no_p = get_prices(m)
+            yes_p, no_p = fetch_live_prices(slug)
             if yes_p is not None and no_p is not None:
                 price_map[cid] = (yes_p, no_p)
 
@@ -203,24 +189,17 @@ class BotRunner:
         log.info("Price updater stopped")
 
     def _refresh_prices(self):
-        """Light pass: update current_no via CLOB API (real-time). No resolution logic."""
+        """Fetch current NO prices via Gamma API and update open positions.
+        Gamma caches outcomePrices ~2 min — that is the resolution limit of
+        Polymarket's public REST API (real-time requires WebSockets).
+        """
         with self.portfolio.lock:
-            positions_meta = [
-                (cid, pos.get("no_token_id"), pos.get("slug"))
-                for cid, pos in self.portfolio.positions.items()
-            ]
+            slugs = self.portfolio.get_position_slugs()
 
-        for cid, no_token_id, slug in positions_meta:
+        for cid, slug in slugs:
             if self._stop_event.is_set():
                 return
-            no_p = None
-            if no_token_id:
-                no_p = fetch_clob_midpoint(no_token_id)
-            if no_p is None:
-                # Fallback to Gamma API
-                m = fetch_market_live(slug)
-                if m:
-                    _, no_p = get_prices(m)
+            _, no_p = fetch_live_prices(slug)
             if no_p is None:
                 continue
             with self.portfolio.lock:

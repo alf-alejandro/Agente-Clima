@@ -84,46 +84,18 @@ def fetch_market_live(slug):
     return None
 
 
-def fetch_clob_midpoint(token_id):
-    """Fetch real-time last-trade price from CLOB API (no server-side cache).
+def fetch_live_prices(slug):
+    """Fetch current YES/NO prices for an open position via Gamma API.
 
-    Strategy (confirmed working against clob.polymarket.com):
-      1. GET /book  → read 'last_trade_price' field  (one call, richest data)
-      2. GET /last-trade-price → read 'price' field  (lighter fallback)
-    The /mid-point endpoint does NOT exist (returns 404).
+    NOTE: Gamma API caches outcomePrices roughly every 2 minutes.
+    No Polymarket public REST endpoint provides tick-level real-time prices;
+    their live feed is WebSocket-only.  The Gamma poll is the best available
+    option for a lightweight REST integration.
     """
-    if not token_id:
-        return None
-
-    # Primary: /book includes last_trade_price in its payload
-    try:
-        r = requests.get(f"{CLOB}/book", params={"token_id": token_id}, timeout=8)
-        if r.status_code == 200:
-            price = r.json().get("last_trade_price")
-            if price is not None:
-                return float(price)
-    except Exception as e:
-        log.debug("CLOB /book failed token=%s: %s", token_id[:16], e)
-
-    # Secondary: dedicated last-trade-price endpoint
-    try:
-        r = requests.get(f"{CLOB}/last-trade-price", params={"token_id": token_id}, timeout=8)
-        if r.status_code == 200:
-            price = r.json().get("price")
-            if price is not None:
-                return float(price)
-    except Exception as e:
-        log.debug("CLOB /last-trade-price failed token=%s: %s", token_id[:16], e)
-
-    log.warning("CLOB failed for token %s...; Gamma fallback will be used", token_id[:16])
-    return None
-
-
-def fetch_clob_prices(yes_token_id, no_token_id):
-    """Fetch real-time YES and NO prices from CLOB. Returns (yes_p, no_p)."""
-    yes_p = fetch_clob_midpoint(yes_token_id)
-    no_p  = fetch_clob_midpoint(no_token_id)
-    return yes_p, no_p
+    m = fetch_market_live(slug)
+    if not m:
+        return None, None
+    return get_prices(m)
 
 
 def scan_opportunities(existing_ids=None):
@@ -166,7 +138,8 @@ def scan_opportunities(existing_ids=None):
             if end_dt and end_dt.date() < today:
                 continue
 
-            clob_ids = m.get("clobTokenIds") or []
+            raw_ids = m.get("clobTokenIds") or "[]"
+            clob_ids = json.loads(raw_ids) if isinstance(raw_ids, str) else raw_ids
             yes_token_id = clob_ids[0] if len(clob_ids) > 0 else None
             no_token_id  = clob_ids[1] if len(clob_ids) > 1 else None
 

@@ -24,7 +24,7 @@ POSITION_SIZE_MIN = float(os.environ.get("POSITION_SIZE_MIN", 0.05))  # 5 %
 POSITION_SIZE_MAX = float(os.environ.get("POSITION_SIZE_MAX", 0.10))  # 10 %
 
 # --- Price update thread ---
-PRICE_UPDATE_INTERVAL = int(os.environ.get("PRICE_UPDATE_INTERVAL", 15))  # seconds
+PRICE_UPDATE_INTERVAL = int(os.environ.get("PRICE_UPDATE_INTERVAL", 120))  # seconds (Gamma cache ~2 min)
 
 # --- Geographic correlation limits ---
 MAX_REGION_EXPOSURE = float(os.environ.get("MAX_REGION_EXPOSURE", 0.25))  # max 25% per region
