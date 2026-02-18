@@ -82,12 +82,24 @@ function updateUI(data) {
     $id("m-wl").textContent = data.won + " / " + data.lost + (data.stopped ? " (" + data.stopped + " SL)" : "");
     $id("m-scans").textContent = data.scan_count;
 
-    // Sync config slider (only if user isn't actively dragging)
+    // Sync config slider
     const slider = $id("cfg-sl-ratio");
     if (data.stop_loss_ratio !== undefined && document.activeElement !== slider) {
         slider.value = data.stop_loss_ratio;
         $id("cfg-sl-ratio-val").textContent = data.stop_loss_ratio.toFixed(2);
     }
+
+    // AI agent badge + buttons
+    const agentOn = data.ai_agent_enabled;
+    const agentBadge = $id("agent-badge");
+    agentBadge.className = "flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium " +
+        (agentOn ? "bg-violet-900/50 text-violet-300" : "bg-gray-800 text-gray-500");
+    agentBadge.innerHTML = `<span class="w-2 h-2 rounded-full ${agentOn ? "bg-violet-400 pulse-dot" : "bg-gray-600"}"></span><span>${agentOn ? "AI On" : "AI Off"}</span>`;
+    $id("btn-agent-on").classList.toggle("hidden", agentOn);
+    $id("btn-agent-off").classList.toggle("hidden", !agentOn);
+
+    // Insights panel
+    updateInsights(data.insights);
 
     // Chart
     const hist = data.capital_history || [];
@@ -128,7 +140,9 @@ function updateUI(data) {
                 <td class="num py-2 pr-3">${(o.no_price * 100).toFixed(1)}&cent;</td>
                 <td class="num py-2 pr-3">${(o.yes_price * 100).toFixed(1)}&cent;</td>
                 <td class="num py-2 pr-3">$${o.volume.toLocaleString()}</td>
-                <td class="num py-2 text-emerald-400">${o.profit_cents.toFixed(1)}&cent;</td>
+                <td class="num py-2 pr-3 text-emerald-400">${o.profit_cents.toFixed(1)}&cent;</td>
+                <td class="num py-2 pr-3">${aiTag(o.ai_recommendation, o.ai_true_prob)}</td>
+                <td class="res py-2">${esc(o.ai_reasoning || "")}</td>
             </tr>
         `).join("");
     }
@@ -170,6 +184,65 @@ async function fetchStatus() {
     } catch (e) {
         console.error("Fetch error:", e);
     }
+}
+
+function aiTag(rec, prob) {
+    if (!rec) return '<span class="text-gray-700">—</span>';
+    const cfg = {
+        ENTER:  { bg: "bg-emerald-900/60 text-emerald-300", label: "ENTER" },
+        REDUCE: { bg: "bg-yellow-900/60 text-yellow-300",   label: "REDUCE" },
+        SKIP:   { bg: "bg-red-900/60 text-red-300",         label: "SKIP" },
+    };
+    const s = cfg[rec] || { bg: "text-gray-400", label: rec };
+    const probStr = prob != null ? ` ${(prob * 100).toFixed(0)}%` : "";
+    return `<span class="px-1.5 py-0.5 rounded text-xs font-semibold ${s.bg}">${s.label}${probStr}</span>`;
+}
+
+function winRateBar(rate) {
+    const pct = (rate * 100).toFixed(0);
+    const color = rate >= 0.7 ? "bg-emerald-500" : rate >= 0.5 ? "bg-yellow-500" : "bg-red-500";
+    return `<div class="flex items-center gap-2">
+        <div class="flex-1 bg-gray-700 rounded-full h-1.5">
+            <div class="${color} h-1.5 rounded-full" style="width:${pct}%"></div>
+        </div>
+        <span class="text-xs text-gray-300 w-8 text-right">${pct}%</span>
+    </div>`;
+}
+
+function updateInsights(ins) {
+    const panel = $id("insights-panel");
+    if (!ins) { panel.classList.add("hidden"); return; }
+    panel.classList.remove("hidden");
+    $id("insights-trades").textContent =
+        `Win rate global: ${(ins.overall_win_rate * 100).toFixed(0)}%  (${ins.total_trades} trades)`;
+
+    $id("insights-city").innerHTML = ins.by_city.map(c =>
+        `<div class="mb-1">
+            <div class="flex justify-between text-xs text-gray-400 mb-0.5">
+                <span>${c.city}</span><span class="text-gray-500">${c.trades} trades</span>
+            </div>${winRateBar(c.win_rate)}</div>`
+    ).join("") || '<p class="text-gray-600 text-xs">Mínimo 2 trades por ciudad</p>';
+
+    $id("insights-hour").innerHTML = ins.by_hour.map(h =>
+        `<div class="mb-1">
+            <div class="flex justify-between text-xs text-gray-400 mb-0.5">
+                <span>${String(h.hour).padStart(2,"0")}:00 UTC</span><span class="text-gray-500">${h.trades} trades</span>
+            </div>${winRateBar(h.win_rate)}</div>`
+    ).join("") || '<p class="text-gray-600 text-xs">Mínimo 2 trades por hora</p>';
+}
+
+async function toggleAgent(enable) {
+    const res = await fetch("/api/agent/toggle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enable }),
+    });
+    if (!res.ok) {
+        const d = await res.json();
+        alert(d.error || "Error al cambiar el agente AI");
+        return;
+    }
+    fetchStatus();
 }
 
 async function saveConfig() {

@@ -120,6 +120,7 @@ def scan_opportunities(existing_ids=None):
 
             opportunities.append({
                 "condition_id": condition_id,
+                "city": city,
                 "question": m.get("question", ""),
                 "yes_price": yes_price,
                 "no_price": no_price,

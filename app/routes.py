@@ -25,6 +25,7 @@ def api_status():
     snap["bot_status"] = bot.status if bot else "unknown"
     snap["scan_count"] = bot.scan_count if bot else 0
     snap["last_opportunities"] = bot.last_opportunities if bot else []
+    snap["ai_agent_enabled"] = bot.ai_agent_enabled if bot else False
     return jsonify(snap)
 
 
@@ -38,6 +39,20 @@ def api_bot_start():
 def api_bot_stop():
     bot.stop()
     return jsonify({"status": "stopped"})
+
+
+@bp.route("/api/agent/toggle", methods=["POST"])
+def api_agent_toggle():
+    from app.config import GEMINI_API_KEY
+    data = request.get_json(silent=True) or {}
+    enable = data.get("enable", not bot.ai_agent_enabled)
+    if enable:
+        if not GEMINI_API_KEY:
+            return jsonify({"error": "GEMINI_API_KEY no configurada en Railway"}), 400
+        bot.enable_agent(GEMINI_API_KEY)
+    else:
+        bot.disable_agent()
+    return jsonify({"ai_agent_enabled": bot.ai_agent_enabled})
 
 
 @bp.route("/api/config", methods=["POST"])

@@ -1,11 +1,29 @@
 import threading
-import time
 import logging
+from datetime import datetime, timezone
 
 from app.scanner import scan_opportunities
-from app.config import MONITOR_INTERVAL
+from app.config import (
+    MONITOR_INTERVAL, GEMINI_API_KEY, AI_AGENT_ENABLED,
+    KELLY_FRACTION_MULTIPLIER, KELLY_MAX_FRACTION,
+)
 
 log = logging.getLogger(__name__)
+
+
+def kelly_amount(capital, no_price, true_prob_no):
+    """Quarter-Kelly position size, capped at KELLY_MAX_FRACTION."""
+    net_odds = (1.0 - no_price) / no_price
+    prob_lose = 1.0 - true_prob_no
+    f_full = (net_odds * true_prob_no - prob_lose) / net_odds
+    f_scaled = max(0.0, f_full) * KELLY_FRACTION_MULTIPLIER
+    return capital * min(f_scaled, KELLY_MAX_FRACTION)
+
+
+def _is_high_edge_window():
+    """True in the 30 min after NWS model updates (0, 6, 12, 18 UTC)."""
+    now = datetime.now(timezone.utc)
+    return now.hour % 6 == 0 and now.minute < 30
 
 
 class BotRunner:
@@ -16,6 +34,26 @@ class BotRunner:
         self.scan_count = 0
         self.last_opportunities = []
         self.status = "stopped"
+        self.ai_agent = None
+        self.ai_agent_enabled = AI_AGENT_ENABLED
+        if self.ai_agent_enabled and GEMINI_API_KEY:
+            self._init_agent(GEMINI_API_KEY)
+
+    def _init_agent(self, api_key):
+        try:
+            from app.ai_agent import WeatherAgent
+            self.ai_agent = WeatherAgent(api_key)
+            log.info("AI agent initialized")
+        except Exception:
+            log.exception("Failed to init AI agent")
+            self.ai_agent = None
+
+    def enable_agent(self, api_key):
+        self._init_agent(api_key)
+        self.ai_agent_enabled = bool(self.ai_agent)
+
+    def disable_agent(self):
+        self.ai_agent_enabled = False
 
     @property
     def is_running(self):
@@ -40,17 +78,26 @@ class BotRunner:
                 self._cycle()
             except Exception:
                 log.exception("Error in bot cycle")
-            self._stop_event.wait(MONITOR_INTERVAL)
+            # Shorter interval during high-edge windows
+            interval = max(10, MONITOR_INTERVAL // 2) if _is_high_edge_window() else MONITOR_INTERVAL
+            self._stop_event.wait(interval)
         log.info("Bot stopped")
 
     def _cycle(self):
         self.scan_count += 1
         portfolio = self.portfolio
 
+        # 1. Get current positions (needs lock for a moment)
         with portfolio.lock:
             existing_ids = set(portfolio.positions.keys())
 
+        # 2. Scan Polymarket (no lock — external HTTP)
         opportunities = scan_opportunities(existing_ids)
+
+        # 3. AI evaluate top candidates (no lock — external HTTP, slow)
+        evaluated = self._evaluate_opportunities(opportunities)
+
+        # 4. Store for dashboard
         self.last_opportunities = [
             {
                 "question": o["question"],
@@ -58,25 +105,79 @@ class BotRunner:
                 "yes_price": o["yes_price"],
                 "volume": o["volume"],
                 "profit_cents": o["profit_cents"],
+                "ai_recommendation": o.get("ai_recommendation", ""),
+                "ai_true_prob": o.get("ai_true_prob"),
+                "ai_reasoning": o.get("ai_reasoning", ""),
             }
-            for o in opportunities[:20]
+            for o in evaluated[:20]
         ]
 
+        # 5. Portfolio operations (with lock)
         with portfolio.lock:
-            # Auto-enter best opportunities
-            for opp in opportunities:
+            # Enter positions
+            for opp in evaluated:
                 if not portfolio.can_open_position():
                     break
-                amount = min(
-                    portfolio.capital_disponible * 0.05,
-                    portfolio.capital_disponible,
-                )
+
+                # Priority 4: geographic limit
+                city = opp.get("city", "")
+                if not portfolio.region_has_capacity(city):
+                    log.info("Region full, skipping %s (%s)", city, opp["question"][:30])
+                    continue
+
+                # AI gate
+                rec = opp.get("ai_recommendation", "")
+                if rec == "SKIP":
+                    log.info("AI SKIP: %s", opp["question"][:45])
+                    continue
+
+                # Priority 1: Kelly sizing
+                amount = self._calc_amount(opp, portfolio.capital_disponible)
                 if amount >= 1:
                     portfolio.open_position(opp, amount)
-                    log.info("Opened: %s @ %.1f cents", opp["question"][:50], opp["no_price"] * 100)
+                    log.info(
+                        "Opened [%s]: %s @ %.1f¢  $%.2f",
+                        rec or "default", opp["question"][:40],
+                        opp["no_price"] * 100, amount,
+                    )
 
-            # Update existing positions
+            # Update prices + detect resolutions
             if portfolio.positions:
                 portfolio.update_positions()
 
+            # Priority 3: partial exits on profitable positions
+            portfolio.check_partial_exits()
+
             portfolio.record_capital()
+
+    def _evaluate_opportunities(self, opportunities):
+        """Run AI on top 3 candidates; rest pass through unmodified."""
+        evaluated = []
+        ai_budget = 3 if (self.ai_agent_enabled and self.ai_agent) else 0
+
+        for opp in opportunities:
+            opp_copy = dict(opp)
+            if ai_budget > 0:
+                result = self.ai_agent.evaluate(opp)
+                if result:
+                    opp_copy["ai_recommendation"] = result.get("recommendation", "")
+                    opp_copy["ai_true_prob"] = result.get("true_prob_no")
+                    opp_copy["ai_reasoning"] = result.get("reasoning", "")
+                ai_budget -= 1
+            evaluated.append(opp_copy)
+
+        return evaluated
+
+    def _calc_amount(self, opp, capital_disponible):
+        """Kelly when AI provides probability, else default 5%."""
+        true_prob = opp.get("ai_true_prob")
+        rec = opp.get("ai_recommendation", "")
+
+        if true_prob and rec in ("ENTER", "REDUCE"):
+            amount = kelly_amount(capital_disponible, opp["no_price"], true_prob)
+            if rec == "REDUCE":
+                amount *= 0.5  # half-size on marginal edge
+        else:
+            amount = capital_disponible * 0.05  # default 5%
+
+        return min(amount, capital_disponible)

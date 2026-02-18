@@ -1,6 +1,10 @@
 import threading
+from collections import defaultdict
 from app.scanner import now_utc, fetch_market_live, get_prices
-from app.config import MAX_POSITIONS, STOP_LOSS_RATIO, STOP_LOSS_ENABLED
+from app.config import (
+    MAX_POSITIONS, STOP_LOSS_RATIO, STOP_LOSS_ENABLED,
+    PARTIAL_EXIT_THRESHOLD, REGION_MAP, MAX_REGION_EXPOSURE,
+)
 
 
 class AutoPortfolio:
@@ -95,6 +99,98 @@ class AutoPortfolio:
         self.closed_positions.append(pos.copy())
         del self.positions[cid]
 
+    # ── Partial exit ─────────────────────────────────────────────────────────
+
+    def check_partial_exits(self):
+        """Close 50% of positions that have captured PARTIAL_EXIT_THRESHOLD of max gain."""
+        for cid, pos in list(self.positions.items()):
+            if pos.get("partial_exited"):
+                continue
+            if pos["max_gain"] <= 0:
+                continue
+            current_pnl = pos["tokens"] * pos["current_no"] - pos["allocated"]
+            if current_pnl / pos["max_gain"] >= PARTIAL_EXIT_THRESHOLD:
+                self._partial_exit(cid)
+
+    def _partial_exit(self, cid, fraction=0.5):
+        pos = self.positions[cid]
+        tokens_sold = pos["tokens"] * fraction
+        sale_value = tokens_sold * pos["current_no"]
+        cost_fraction = pos["allocated"] * fraction
+        realized_pnl = sale_value - cost_fraction
+
+        pos["tokens"] *= (1 - fraction)
+        pos["allocated"] *= (1 - fraction)
+        pos["max_gain"] *= (1 - fraction)
+        pos["partial_exited"] = True
+
+        self.capital_disponible += cost_fraction + realized_pnl
+        self.capital_total += realized_pnl
+
+    # ── Region exposure ───────────────────────────────────────────────────────
+
+    def get_region_allocated(self, region):
+        return sum(
+            pos["allocated"]
+            for pos in self.positions.values()
+            if REGION_MAP.get(pos.get("city", ""), "other") == region
+        )
+
+    def region_has_capacity(self, city):
+        region = REGION_MAP.get(city, "other")
+        allocated = self.get_region_allocated(region)
+        return allocated < self.capital_total * MAX_REGION_EXPOSURE
+
+    # ── Learning insights ─────────────────────────────────────────────────────
+
+    def compute_insights(self):
+        closed = self.closed_positions
+        if len(closed) < 5:
+            return None
+
+        by_hour = defaultdict(lambda: {"won": 0, "total": 0})
+        by_city = defaultdict(lambda: {"won": 0, "total": 0})
+
+        for pos in closed:
+            try:
+                hour = int(pos["entry_time"][11:13])  # fast ISO parse
+            except Exception:
+                hour = -1
+            city = pos.get("city", "unknown")
+            won = pos["status"] == "WON"
+
+            if hour >= 0:
+                by_hour[hour]["total"] += 1
+                if won:
+                    by_hour[hour]["won"] += 1
+
+            by_city[city]["total"] += 1
+            if won:
+                by_city[city]["won"] += 1
+
+        total = len(closed)
+        won_total = sum(1 for p in closed if p["status"] == "WON")
+
+        hour_stats = sorted(
+            [{"hour": h, "win_rate": round(v["won"] / v["total"], 2), "trades": v["total"]}
+             for h, v in by_hour.items() if v["total"] >= 2],
+            key=lambda x: x["win_rate"], reverse=True,
+        )
+        city_stats = sorted(
+            [{"city": c, "win_rate": round(v["won"] / v["total"], 2), "trades": v["total"]}
+             for c, v in by_city.items() if v["total"] >= 2],
+            key=lambda x: x["win_rate"], reverse=True,
+        )
+
+        return {
+            "overall_win_rate": round(won_total / total, 2),
+            "total_trades": total,
+            "by_hour": hour_stats[:6],
+            "by_city": city_stats[:6],
+        }
+
+    # ── Capital snapshot ──────────────────────────────────────────────────────
+
     def record_capital(self):
         self.capital_history.append({
             "time": now_utc().isoformat(),
@@ -115,12 +211,14 @@ class AutoPortfolio:
             float_pnl = pos["tokens"] * pos["current_no"] - pos["allocated"]
             open_positions.append({
                 "question": pos["question"],
+                "city": pos.get("city", ""),
                 "entry_no": pos["entry_no"],
                 "current_no": pos["current_no"],
                 "allocated": round(pos["allocated"], 2),
                 "pnl": round(float_pnl, 2),
                 "entry_time": pos["entry_time"],
                 "status": pos["status"],
+                "partial_exited": pos.get("partial_exited", False),
             })
 
         closed = []
@@ -150,4 +248,5 @@ class AutoPortfolio:
             "capital_history": self.capital_history,
             "session_start": self.session_start.isoformat(),
             "stop_loss_ratio": self.stop_loss_ratio,
+            "insights": self.compute_insights(),
         }

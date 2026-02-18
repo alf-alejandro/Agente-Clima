@@ -13,6 +13,31 @@ MAX_HOURS_TO_CLOSE = int(os.environ.get("MAX_HOURS_TO_CLOSE", 8))
 STOP_LOSS_RATIO   = float(os.environ.get("STOP_LOSS_RATIO", 0.8))   # stop = max_gain * ratio
 STOP_LOSS_ENABLED = os.environ.get("STOP_LOSS_ENABLED", "true").lower() == "true"
 
+# --- AI Agent ---
+GEMINI_API_KEY           = os.environ.get("GEMINI_API_KEY", "")
+AI_AGENT_ENABLED         = os.environ.get("AI_AGENT_ENABLED", "false").lower() == "true"
+
+# --- Kelly position sizing ---
+KELLY_FRACTION_MULTIPLIER = float(os.environ.get("KELLY_FRACTION_MULTIPLIER", 0.25))  # quarter-Kelly
+KELLY_MAX_FRACTION        = float(os.environ.get("KELLY_MAX_FRACTION", 0.20))         # hard cap 20%
+
+# --- Geographic correlation limits ---
+MAX_REGION_EXPOSURE = float(os.environ.get("MAX_REGION_EXPOSURE", 0.25))  # max 25% per region
+
+REGION_MAP = {
+    "chicago": "midwest",       "denver": "midwest",
+    "dallas": "south",          "houston": "south",
+    "atlanta": "south",         "miami": "south",         "phoenix": "south",
+    "boston": "northeast",      "new-york-city": "northeast",
+    "seattle": "pacific",       "los-angeles": "pacific",
+    "london": "europe",         "paris": "europe",        "ankara": "europe",
+    "wellington": "southern",   "buenos-aires": "southern", "sao-paulo": "southern",
+    "seoul": "asia",            "toronto": "north_america",
+}
+
+# --- Partial exit ---
+PARTIAL_EXIT_THRESHOLD = float(os.environ.get("PARTIAL_EXIT_THRESHOLD", 0.70))  # exit 50% at 70% profit captured
+
 # --- Capital ---
 INITIAL_CAPITAL = float(os.environ.get("INITIAL_CAPITAL", 100.0))
 AUTO_MODE       = os.environ.get("AUTO_MODE", "true").lower() == "true"
