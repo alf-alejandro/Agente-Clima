@@ -15,6 +15,7 @@ class AutoPortfolio:
         self.capital_history = [
             {"time": now_utc().isoformat(), "capital": initial_capital}
         ]
+        self.stop_loss_ratio = STOP_LOSS_RATIO  # mutable at runtime
 
     def can_open_position(self):
         return (len(self.positions) < MAX_POSITIONS and
@@ -24,8 +25,8 @@ class AutoPortfolio:
         tokens = amount / opp["no_price"]
         max_gain = tokens * 1.0 - amount
 
-        # Dynamic stop: risk at most STOP_LOSS_RATIO * max_gain (R:R stays constant)
-        dynamic_trigger = -(1.0 - opp["no_price"]) * STOP_LOSS_RATIO
+        # Dynamic stop: risk at most stop_loss_ratio * max_gain (R:R stays constant)
+        dynamic_trigger = -(1.0 - opp["no_price"]) * self.stop_loss_ratio
         stop_price = opp["no_price"] + dynamic_trigger
         stop_value = tokens * stop_price
         stop_loss = stop_value - amount
@@ -148,4 +149,5 @@ class AutoPortfolio:
             "closed_positions": closed,
             "capital_history": self.capital_history,
             "session_start": self.session_start.isoformat(),
+            "stop_loss_ratio": self.stop_loss_ratio,
         }

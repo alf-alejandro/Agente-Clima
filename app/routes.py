@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, jsonify
+from flask import Blueprint, render_template, jsonify, request
 
 bp = Blueprint("main", __name__)
 
@@ -38,3 +38,16 @@ def api_bot_start():
 def api_bot_stop():
     bot.stop()
     return jsonify({"status": "stopped"})
+
+
+@bp.route("/api/config", methods=["POST"])
+def api_config():
+    data = request.get_json(silent=True) or {}
+    if "stop_loss_ratio" in data:
+        ratio = float(data["stop_loss_ratio"])
+        if not (0.1 <= ratio <= 3.0):
+            return jsonify({"error": "stop_loss_ratio debe estar entre 0.1 y 3.0"}), 400
+        with portfolio.lock:
+            portfolio.stop_loss_ratio = round(ratio, 2)
+    with portfolio.lock:
+        return jsonify({"stop_loss_ratio": portfolio.stop_loss_ratio})

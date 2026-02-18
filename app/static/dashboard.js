@@ -82,6 +82,13 @@ function updateUI(data) {
     $id("m-wl").textContent = data.won + " / " + data.lost + (data.stopped ? " (" + data.stopped + " SL)" : "");
     $id("m-scans").textContent = data.scan_count;
 
+    // Sync config slider (only if user isn't actively dragging)
+    const slider = $id("cfg-sl-ratio");
+    if (data.stop_loss_ratio !== undefined && document.activeElement !== slider) {
+        slider.value = data.stop_loss_ratio;
+        $id("cfg-sl-ratio-val").textContent = data.stop_loss_ratio.toFixed(2);
+    }
+
     // Chart
     const hist = data.capital_history || [];
     capitalChart.data.labels = hist.map(h => formatTime(h.time));
@@ -162,6 +169,20 @@ async function fetchStatus() {
         }
     } catch (e) {
         console.error("Fetch error:", e);
+    }
+}
+
+async function saveConfig() {
+    const ratio = parseFloat($id("cfg-sl-ratio").value);
+    const res = await fetch("/api/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stop_loss_ratio: ratio }),
+    });
+    if (res.ok) {
+        const saved = $id("cfg-saved");
+        saved.classList.remove("hidden");
+        setTimeout(() => saved.classList.add("hidden"), 2000);
     }
 }
 
