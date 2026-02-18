@@ -97,7 +97,52 @@ class BotRunner:
         # 2. Scan Polymarket (no lock — external HTTP)
         opportunities = scan_opportunities(existing_ids)
 
-        # 3. Store for dashboard
+        # 3. Verify real-time entry price via CLOB (max 5 to avoid long blocking).
+        #    Opportunities that CLOB confirms are out of range are dropped entirely —
+        #    they won't be entered and shouldn't appear in the dashboard.
+        MAX_CLOB_VERIFY = 5
+        with portfolio.lock:
+            open_count = len(portfolio.positions)
+
+        slots_available = max(0, MAX_POSITIONS - open_count)
+        verify_n = min(len(opportunities), max(slots_available, MAX_CLOB_VERIFY))
+        candidates = opportunities[:verify_n]
+
+        verified_opps = []   # will enter these
+        display_opps = []    # will show in dashboard (with real-time prices where available)
+        clob_entry_ok = True
+        clob_entry_fails = 0
+
+        for opp in candidates:
+            if self._stop_event.is_set():
+                return
+            no_tid = opp.get("no_token_id")
+            rt_yes, rt_no = None, None
+            if clob_entry_ok and no_tid:
+                rt_yes, rt_no = fetch_no_price_clob(no_tid)
+                if rt_no is not None and rt_no < 0.50:
+                    rt_yes, rt_no = None, None
+                if rt_no is None:
+                    clob_entry_fails += 1
+                    if clob_entry_fails >= 2:
+                        clob_entry_ok = False
+
+            if rt_no is not None:
+                if not (MIN_NO_PRICE <= rt_no <= MAX_NO_PRICE):
+                    log.info(
+                        "Entry skip %s — CLOB price %.1f¢ out of range",
+                        opp["question"][:35], rt_no * 100,
+                    )
+                    # Price moved out of range — skip entirely (don't display)
+                    continue
+                opp = {**opp, "no_price": rt_no, "yes_price": rt_yes or round(1 - rt_no, 4)}
+
+            verified_opps.append(opp)
+            display_opps.append(opp)
+
+        # Non-candidate opportunities (beyond verify_n) shown with Gamma prices
+        display_opps.extend(opportunities[verify_n:verify_n + (20 - len(display_opps))])
+
         self.last_opportunities = [
             {
                 "question": o["question"],
@@ -106,7 +151,7 @@ class BotRunner:
                 "volume": o["volume"],
                 "profit_cents": o["profit_cents"],
             }
-            for o in opportunities[:20]
+            for o in display_opps[:20]
         ]
 
         # 4. Fetch current prices for open positions — CLOB first, Gamma fallback
@@ -115,7 +160,6 @@ class BotRunner:
                 (cid, pos.get("no_token_id"), pos.get("slug"))
                 for cid, pos in portfolio.positions.items()
             ]
-            open_count = len(portfolio.positions)
 
         price_map = {}
         clob_ok_cycle = True
@@ -137,38 +181,6 @@ class BotRunner:
                 yes_p, no_p = fetch_live_prices(slug)
             if yes_p is not None and no_p is not None:
                 price_map[cid] = (yes_p, no_p)
-
-        # 4b. Verify real-time entry price for candidate opportunities (outside lock).
-        slots_available = max(0, MAX_POSITIONS - open_count)
-        candidates = opportunities[:max(slots_available, 1)]
-
-        verified_opps = []
-        clob_entry_ok = True
-        clob_entry_fails = 0
-        for opp in candidates:
-            if self._stop_event.is_set():
-                return
-            no_tid = opp.get("no_token_id")
-            rt_yes, rt_no = None, None
-            if clob_entry_ok and no_tid:
-                rt_yes, rt_no = fetch_no_price_clob(no_tid)
-                if rt_no is not None and rt_no < 0.50:
-                    rt_yes, rt_no = None, None
-                if rt_no is None:
-                    clob_entry_fails += 1
-                    if clob_entry_fails >= 2:
-                        clob_entry_ok = False
-
-            if rt_no is not None:
-                if not (MIN_NO_PRICE <= rt_no <= MAX_NO_PRICE):
-                    log.info(
-                        "Entry skip %s — CLOB price %.1f¢ out of range",
-                        opp["question"][:35], rt_no * 100,
-                    )
-                    continue
-                opp = {**opp, "no_price": rt_no, "yes_price": rt_yes or round(1 - rt_no, 4)}
-                log.info("Entry price verified via CLOB: %.1f¢", rt_no * 100)
-            verified_opps.append(opp)
 
         # 5. Portfolio operations (with lock — fast, no HTTP inside)
         with portfolio.lock:
