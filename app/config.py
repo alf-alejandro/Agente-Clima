@@ -15,7 +15,8 @@ STOP_LOSS_ENABLED = os.environ.get("STOP_LOSS_ENABLED", "true").lower() == "true
 
 # --- AI Agent ---
 GEMINI_API_KEY           = os.environ.get("GEMINI_API_KEY", "")
-AI_AGENT_ENABLED         = os.environ.get("AI_AGENT_ENABLED", "false").lower() == "true"
+AI_AGENT_ENABLED         = os.environ.get("AI_AGENT_ENABLED", "true").lower() == "true"
+AI_COST_PER_CALL         = float(os.environ.get("AI_COST_PER_CALL", 0.0003))
 
 # --- Kelly position sizing ---
 KELLY_FRACTION_MULTIPLIER = float(os.environ.get("KELLY_FRACTION_MULTIPLIER", 0.25))  # quarter-Kelly

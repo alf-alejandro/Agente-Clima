@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from app.scanner import scan_opportunities
 from app.config import (
     MONITOR_INTERVAL, GEMINI_API_KEY, AI_AGENT_ENABLED,
-    KELLY_FRACTION_MULTIPLIER, KELLY_MAX_FRACTION,
+    KELLY_FRACTION_MULTIPLIER, KELLY_MAX_FRACTION, AI_COST_PER_CALL,
 )
 
 log = logging.getLogger(__name__)
@@ -36,6 +36,7 @@ class BotRunner:
         self.status = "stopped"
         self.ai_agent = None
         self.ai_agent_enabled = AI_AGENT_ENABLED
+        self.ai_call_count = 0
         if self.ai_agent_enabled and GEMINI_API_KEY:
             self._init_agent(GEMINI_API_KEY)
 
@@ -158,6 +159,7 @@ class BotRunner:
         for opp in opportunities:
             opp_copy = dict(opp)
             if ai_budget > 0:
+                self.ai_call_count += 1
                 result = self.ai_agent.evaluate(opp)
                 if result:
                     opp_copy["ai_recommendation"] = result.get("recommendation", "")

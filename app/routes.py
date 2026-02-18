@@ -1,4 +1,5 @@
 from flask import Blueprint, render_template, jsonify, request
+from app.config import AI_COST_PER_CALL
 
 bp = Blueprint("main", __name__)
 
@@ -26,6 +27,8 @@ def api_status():
     snap["scan_count"] = bot.scan_count if bot else 0
     snap["last_opportunities"] = bot.last_opportunities if bot else []
     snap["ai_agent_enabled"] = bot.ai_agent_enabled if bot else False
+    snap["ai_call_count"] = bot.ai_call_count if bot else 0
+    snap["ai_cost_total"] = round(bot.ai_call_count * AI_COST_PER_CALL, 4) if bot else 0
     return jsonify(snap)
 
 

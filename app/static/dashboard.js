@@ -81,6 +81,8 @@ function updateUI(data) {
 
     $id("m-wl").textContent = data.won + " / " + data.lost + (data.stopped ? " (" + data.stopped + " SL)" : "");
     $id("m-scans").textContent = data.scan_count;
+    $id("m-ai-calls").textContent = data.ai_call_count ?? 0;
+    $id("m-ai-cost").textContent = "$" + (data.ai_cost_total ?? 0).toFixed(4);
 
     // Sync config slider
     const slider = $id("cfg-sl-ratio");
