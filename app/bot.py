@@ -7,9 +7,8 @@ from app.scanner import (
     get_prices, fetch_market_live,
 )
 from app.config import (
-    MONITOR_INTERVAL, GEMINI_API_KEY, AI_AGENT_ENABLED,
-    AI_COST_PER_CALL, POSITION_SIZE_MIN, POSITION_SIZE_MAX,
-    MIN_NO_PRICE, MAX_NO_PRICE, AI_SCAN_INTERVAL, PRICE_UPDATE_INTERVAL,
+    MONITOR_INTERVAL, POSITION_SIZE_MIN, POSITION_SIZE_MAX,
+    MIN_NO_PRICE, MAX_NO_PRICE, PRICE_UPDATE_INTERVAL, MAX_POSITIONS,
 )
 
 log = logging.getLogger(__name__)
@@ -39,36 +38,10 @@ class BotRunner:
         self._stop_event = threading.Event()
         self._thread = None
         self._price_thread = None
-        self._ai_thread = None
         self.scan_count = 0
         self.last_opportunities = []
         self.status = "stopped"
-        self.ai_agent = None
-        self.ai_agent_enabled = AI_AGENT_ENABLED
-        self.ai_call_count = 0
-        # Serialise AI API calls: only 1 in flight at a time
-        self._ai_lock = threading.Lock()
         self.last_price_update = None   # datetime UTC, updated after each price refresh
-        if self.ai_agent_enabled and GEMINI_API_KEY:
-            self._init_agent(GEMINI_API_KEY)
-
-    # ── Agent lifecycle ────────────────────────────────────────────────────────
-
-    def _init_agent(self, api_key):
-        try:
-            from app.ai_agent import WeatherAgent
-            self.ai_agent = WeatherAgent(api_key)
-            log.info("AI agent initialized")
-        except Exception:
-            log.exception("Failed to init AI agent")
-            self.ai_agent = None
-
-    def enable_agent(self, api_key):
-        self._init_agent(api_key)
-        self.ai_agent_enabled = bool(self.ai_agent)
-
-    def disable_agent(self):
-        self.ai_agent_enabled = False
 
     @property
     def is_running(self):
@@ -82,10 +55,8 @@ class BotRunner:
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._price_thread = threading.Thread(target=self._run_prices, daemon=True)
-        self._ai_thread = threading.Thread(target=self._run_ai, daemon=True)
         self._thread.start()
         self._price_thread.start()
-        self._ai_thread.start()
         self.status = "running"
 
     def stop(self):
@@ -126,7 +97,7 @@ class BotRunner:
         # 2. Scan Polymarket (no lock — external HTTP)
         opportunities = scan_opportunities(existing_ids)
 
-        # 3. Store for dashboard (no AI at entry)
+        # 3. Store for dashboard
         self.last_opportunities = [
             {
                 "question": o["question"],
@@ -134,9 +105,6 @@ class BotRunner:
                 "yes_price": o["yes_price"],
                 "volume": o["volume"],
                 "profit_cents": o["profit_cents"],
-                "ai_recommendation": "",
-                "ai_true_prob": None,
-                "ai_reasoning": "",
             }
             for o in opportunities[:20]
         ]
@@ -171,11 +139,8 @@ class BotRunner:
                 price_map[cid] = (yes_p, no_p)
 
         # 4b. Verify real-time entry price for candidate opportunities (outside lock).
-        # Only check as many as the portfolio has room for — avoids verifying 15+
-        # markets when there is only capacity for 1-2 more positions.
-        from app.config import MAX_POSITIONS
         slots_available = max(0, MAX_POSITIONS - open_count)
-        candidates = opportunities[:max(slots_available, 1)]  # at least check 1
+        candidates = opportunities[:max(slots_available, 1)]
 
         verified_opps = []
         clob_entry_ok = True
@@ -187,7 +152,6 @@ class BotRunner:
             rt_yes, rt_no = None, None
             if clob_entry_ok and no_tid:
                 rt_yes, rt_no = fetch_no_price_clob(no_tid)
-                # Sanity: wrong token ID → discard
                 if rt_no is not None and rt_no < 0.50:
                     rt_yes, rt_no = None, None
                 if rt_no is None:
@@ -196,21 +160,18 @@ class BotRunner:
                         clob_entry_ok = False
 
             if rt_no is not None:
-                # Price out of entry range → skip this opportunity
                 if not (MIN_NO_PRICE <= rt_no <= MAX_NO_PRICE):
                     log.info(
                         "Entry skip %s — CLOB price %.1f¢ out of range",
                         opp["question"][:35], rt_no * 100,
                     )
                     continue
-                # Update with real-time price so position opens at correct price
                 opp = {**opp, "no_price": rt_no, "yes_price": rt_yes or round(1 - rt_no, 4)}
                 log.info("Entry price verified via CLOB: %.1f¢", rt_no * 100)
             verified_opps.append(opp)
 
         # 5. Portfolio operations (with lock — fast, no HTTP inside)
         with portfolio.lock:
-            # Enter new positions (no AI gate)
             for opp in verified_opps:
                 if not portfolio.can_open_position():
                     break
@@ -230,17 +191,13 @@ class BotRunner:
                         opp["question"][:40], opp["no_price"] * 100, amount,
                     )
 
-            # Apply fetched prices + check resolutions / stop-loss
             if price_map:
                 portfolio.apply_price_updates(price_map)
 
-            # Calculation-based partial exit: take 50 % at PARTIAL_EXIT_THRESHOLD
             portfolio.check_partial_exits()
-
             portfolio.record_capital()
 
     # ── Price update loop (every PRICE_UPDATE_INTERVAL seconds) ───────────────
-    # Keeps current_no fresh so the dashboard shows live P&L between cycles.
 
     def _run_prices(self):
         log.info("Price updater started")
@@ -267,7 +224,7 @@ class BotRunner:
             ]
 
         updated = 0
-        clob_ok = True          # flip to False after 2 consecutive CLOB failures
+        clob_ok = True
         clob_failures = 0
 
         for cid, no_tid, slug in pos_data:
@@ -280,9 +237,6 @@ class BotRunner:
             if clob_ok and no_tid:
                 yes_p, no_p = fetch_no_price_clob(no_tid)
                 if no_p is not None:
-                    # Sanity: our NO positions are always entered at > 0.88.
-                    # If CLOB returns < 0.50, we likely got the YES token price
-                    # (clobTokenIds ordering varies per market). Discard it.
                     if no_p < 0.50:
                         log.warning(
                             "CLOB returned %.3f for NO token (likely YES token) — Gamma fallback",
@@ -319,58 +273,3 @@ class BotRunner:
 
         if updated > 0 or not pos_data:
             self.last_price_update = datetime.now(timezone.utc)
-
-    # ── AI take-profit loop (every AI_SCAN_INTERVAL seconds) ──────────────────
-    # Waits first, then evaluates open positions one-by-one, serialised.
-
-    def _run_ai(self):
-        log.info("AI take-profit loop started")
-        # First wait before first sweep so the bot has time to enter positions
-        self._stop_event.wait(AI_SCAN_INTERVAL)
-        while not self._stop_event.is_set():
-            try:
-                self._ai_cycle()
-            except Exception:
-                log.exception("Error in AI cycle")
-            self._stop_event.wait(AI_SCAN_INTERVAL)
-        log.info("AI take-profit loop stopped")
-
-    def _ai_cycle(self):
-        """Evaluate each open position with AI; EXIT if forecast turns against us."""
-        if not (self.ai_agent_enabled and self.ai_agent):
-            return
-
-        with self.portfolio.lock:
-            positions_snapshot = [(cid, dict(pos)) for cid, pos in self.portfolio.positions.items()]
-
-        for cid, pos in positions_snapshot:
-            if self._stop_event.is_set():
-                break
-            # Serialised: one AI API call at a time (no parallel requests)
-            with self._ai_lock:
-                try:
-                    self.ai_call_count += 1
-                    result = self.ai_agent.evaluate_position(pos)
-                    if not result:
-                        continue
-                    rec = result.get("recommendation", "")
-                    log.info(
-                        "AI take-profit %s → %s (%s)",
-                        pos.get("question", "")[:40],
-                        rec,
-                        result.get("reasoning", ""),
-                    )
-                    if rec == "EXIT":
-                        with self.portfolio.lock:
-                            if cid in self.portfolio.positions:
-                                p = self.portfolio.positions[cid]
-                                realized_pnl = p["tokens"] * p["current_no"] - p["allocated"]
-                                status = "WON" if realized_pnl > 0 else "LOST"
-                                reason = (
-                                    f"AI EXIT: {result.get('reasoning', '')} "
-                                    f"(NO={p['current_no']*100:.1f}¢)"
-                                )
-                                self.portfolio._close_position(cid, status, realized_pnl, reason)
-                                self.portfolio.record_capital()
-                except Exception:
-                    log.exception("AI take-profit eval failed: %s", pos.get("question", "")[:45])

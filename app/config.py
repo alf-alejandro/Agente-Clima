@@ -13,12 +13,6 @@ MAX_HOURS_TO_CLOSE = int(os.environ.get("MAX_HOURS_TO_CLOSE", 8))
 STOP_LOSS_RATIO   = float(os.environ.get("STOP_LOSS_RATIO", 0.8))   # stop = max_gain * ratio
 STOP_LOSS_ENABLED = os.environ.get("STOP_LOSS_ENABLED", "true").lower() == "true"
 
-# --- AI Agent ---
-GEMINI_API_KEY           = os.environ.get("GEMINI_API_KEY", "")
-AI_AGENT_ENABLED         = os.environ.get("AI_AGENT_ENABLED", "true").lower() == "true"
-AI_COST_PER_CALL         = float(os.environ.get("AI_COST_PER_CALL", 0.0003))
-AI_SCAN_INTERVAL         = int(os.environ.get("AI_SCAN_INTERVAL", 1800))   # 30 min between AI take-profit sweeps
-
 # --- Position sizing (5 % – 10 % of total capital, scaled by NO price) ---
 POSITION_SIZE_MIN = float(os.environ.get("POSITION_SIZE_MIN", 0.05))  # 5 %
 POSITION_SIZE_MAX = float(os.environ.get("POSITION_SIZE_MAX", 0.10))  # 10 %
