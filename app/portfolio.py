@@ -62,26 +62,30 @@ class AutoPortfolio:
             pos["current_no"] = no_price
 
             if yes_price >= 0.99:
-                to_close.append((cid, "LOST", -pos["allocated"]))
+                resolution = f"YES resolvió — temperatura superó el umbral (YES={yes_price*100:.1f}¢)"
+                to_close.append((cid, "LOST", -pos["allocated"], resolution))
             elif no_price >= 0.99:
-                to_close.append((cid, "WON", pos["max_gain"]))
+                resolution = f"NO resolvió — temperatura no superó el umbral (NO={no_price*100:.1f}¢)"
+                to_close.append((cid, "WON", pos["max_gain"], resolution))
             elif STOP_LOSS_ENABLED:
                 drop = no_price - pos["entry_no"]
                 if drop <= pos["stop_trigger"]:
                     sale_value = pos["tokens"] * no_price
                     realized_loss = sale_value - pos["allocated"]
-                    to_close.append((cid, "STOPPED", realized_loss))
+                    resolution = f"Stop loss @ NO={no_price*100:.1f}¢ (entrada {pos['entry_no']*100:.1f}¢, caída {drop*100:.1f}¢)"
+                    to_close.append((cid, "STOPPED", realized_loss, resolution))
 
-        for cid, status, pnl in to_close:
-            self._close_position(cid, status, pnl)
+        for cid, status, pnl, resolution in to_close:
+            self._close_position(cid, status, pnl, resolution)
 
-    def _close_position(self, cid, status, pnl):
+    def _close_position(self, cid, status, pnl, resolution=""):
         if cid not in self.positions:
             return
         pos = self.positions[cid]
         pos["status"] = status
         pos["pnl"] = pnl
         pos["close_time"] = now_utc().isoformat()
+        pos["resolution"] = resolution
 
         recovered = pos["allocated"] + pnl
         self.capital_disponible += recovered
@@ -126,6 +130,7 @@ class AutoPortfolio:
                 "allocated": round(pos["allocated"], 2),
                 "pnl": round(pos["pnl"], 2),
                 "status": pos["status"],
+                "resolution": pos.get("resolution", ""),
                 "entry_time": pos["entry_time"],
                 "close_time": pos.get("close_time", ""),
             })

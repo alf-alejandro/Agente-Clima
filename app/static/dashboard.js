@@ -43,8 +43,8 @@ function pnlSign(val) {
     return val >= 0 ? "+" : "";
 }
 
-function truncate(str, len) {
-    return str.length > len ? str.slice(0, len) + "..." : str;
+function esc(str) {
+    return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function formatTime(iso) {
@@ -98,11 +98,11 @@ function updateUI(data) {
         $id("no-open").classList.add("hidden");
         openTb.innerHTML = openPos.map(p => `
             <tr class="border-b border-gray-800">
-                <td class="py-2 pr-2">${truncate(p.question, 40)}</td>
-                <td>${(p.entry_no * 100).toFixed(1)}&cent;</td>
-                <td>${(p.current_no * 100).toFixed(1)}&cent;</td>
-                <td>$${p.allocated.toFixed(2)}</td>
-                <td class="${pnlColor(p.pnl)}">${pnlSign(p.pnl)}$${p.pnl.toFixed(2)}</td>
+                <td class="q py-2 pr-3">${esc(p.question)}</td>
+                <td class="num py-2 pr-3">${(p.entry_no * 100).toFixed(1)}&cent;</td>
+                <td class="num py-2 pr-3">${(p.current_no * 100).toFixed(1)}&cent;</td>
+                <td class="num py-2 pr-3">$${p.allocated.toFixed(2)}</td>
+                <td class="num py-2 ${pnlColor(p.pnl)}">${pnlSign(p.pnl)}$${p.pnl.toFixed(2)}</td>
             </tr>
         `).join("");
     }
@@ -117,11 +117,11 @@ function updateUI(data) {
         $id("no-opps").classList.add("hidden");
         oppsTb.innerHTML = opps.map(o => `
             <tr class="border-b border-gray-800">
-                <td class="py-2 pr-2">${truncate(o.question, 40)}</td>
-                <td>${(o.no_price * 100).toFixed(1)}&cent;</td>
-                <td>${(o.yes_price * 100).toFixed(1)}&cent;</td>
-                <td>$${o.volume.toLocaleString()}</td>
-                <td class="text-emerald-400">${o.profit_cents.toFixed(1)}&cent;</td>
+                <td class="q py-2 pr-3">${esc(o.question)}</td>
+                <td class="num py-2 pr-3">${(o.no_price * 100).toFixed(1)}&cent;</td>
+                <td class="num py-2 pr-3">${(o.yes_price * 100).toFixed(1)}&cent;</td>
+                <td class="num py-2 pr-3">$${o.volume.toLocaleString()}</td>
+                <td class="num py-2 text-emerald-400">${o.profit_cents.toFixed(1)}&cent;</td>
             </tr>
         `).join("");
     }
@@ -139,12 +139,13 @@ function updateUI(data) {
                                 c.status === "STOPPED" ? "text-yellow-400" : "text-red-400";
             return `
                 <tr class="border-b border-gray-800">
-                    <td class="py-2 pr-2">${truncate(c.question, 40)}</td>
-                    <td>${(c.entry_no * 100).toFixed(1)}&cent;</td>
-                    <td>$${c.allocated.toFixed(2)}</td>
-                    <td class="${pnlColor(c.pnl)}">${pnlSign(c.pnl)}$${c.pnl.toFixed(2)}</td>
-                    <td class="${statusColor}">${c.status}</td>
-                    <td>${formatTime(c.close_time)}</td>
+                    <td class="q py-2 pr-3">${esc(c.question)}</td>
+                    <td class="num py-2 pr-3">${(c.entry_no * 100).toFixed(1)}&cent;</td>
+                    <td class="num py-2 pr-3">$${c.allocated.toFixed(2)}</td>
+                    <td class="num py-2 pr-3 ${pnlColor(c.pnl)}">${pnlSign(c.pnl)}$${c.pnl.toFixed(2)}</td>
+                    <td class="num py-2 pr-3 font-semibold ${statusColor}">${c.status}</td>
+                    <td class="res py-2 pr-3">${esc(c.resolution || "-")}</td>
+                    <td class="num py-2">${formatTime(c.close_time)}</td>
                 </tr>
             `;
         }).join("");

@@ -14,6 +14,9 @@
             0%, 100% { opacity: 1; }
             50% { opacity: 0.4; }
         }
+        td.q { min-width: 220px; word-break: break-word; white-space: normal; line-height: 1.4; }
+        td.num { white-space: nowrap; }
+        td.res { min-width: 180px; word-break: break-word; white-space: normal; line-height: 1.4; font-size: 0.75rem; color: #94a3b8; }
     </style>
 </head>
 <body class="text-gray-200 min-h-screen">
@@ -85,11 +88,11 @@
                 <table class="w-full text-sm">
                     <thead>
                         <tr class="text-left text-gray-500 border-b border-gray-700">
-                            <th class="pb-2">Mercado</th>
-                            <th class="pb-2">Entrada</th>
-                            <th class="pb-2">Actual</th>
-                            <th class="pb-2">Invertido</th>
-                            <th class="pb-2">P&L</th>
+                            <th class="pb-2 pr-3">Mercado</th>
+                            <th class="pb-2 pr-3 whitespace-nowrap">Entrada</th>
+                            <th class="pb-2 pr-3 whitespace-nowrap">Actual</th>
+                            <th class="pb-2 pr-3 whitespace-nowrap">Invertido</th>
+                            <th class="pb-2 whitespace-nowrap">P&L</th>
                         </tr>
                     </thead>
                     <tbody id="table-open"></tbody>
@@ -103,11 +106,11 @@
                 <table class="w-full text-sm">
                     <thead>
                         <tr class="text-left text-gray-500 border-b border-gray-700">
-                            <th class="pb-2">Mercado</th>
-                            <th class="pb-2">NO</th>
-                            <th class="pb-2">YES</th>
-                            <th class="pb-2">Vol</th>
-                            <th class="pb-2">Profit</th>
+                            <th class="pb-2 pr-3">Mercado</th>
+                            <th class="pb-2 pr-3 whitespace-nowrap">NO</th>
+                            <th class="pb-2 pr-3 whitespace-nowrap">YES</th>
+                            <th class="pb-2 pr-3 whitespace-nowrap">Vol</th>
+                            <th class="pb-2 whitespace-nowrap">Profit</th>
                         </tr>
                     </thead>
                     <tbody id="table-opps"></tbody>
@@ -122,12 +125,13 @@
             <table class="w-full text-sm">
                 <thead>
                     <tr class="text-left text-gray-500 border-b border-gray-700">
-                        <th class="pb-2">Mercado</th>
-                        <th class="pb-2">Entrada NO</th>
-                        <th class="pb-2">Invertido</th>
-                        <th class="pb-2">P&L</th>
-                        <th class="pb-2">Estado</th>
-                        <th class="pb-2">Cerrado</th>
+                        <th class="pb-2 pr-3">Mercado</th>
+                        <th class="pb-2 pr-3 whitespace-nowrap">Entrada NO</th>
+                        <th class="pb-2 pr-3 whitespace-nowrap">Invertido</th>
+                        <th class="pb-2 pr-3 whitespace-nowrap">P&L</th>
+                        <th class="pb-2 pr-3 whitespace-nowrap">Estado</th>
+                        <th class="pb-2 pr-3">Resolución</th>
+                        <th class="pb-2 whitespace-nowrap">Cerrado</th>
                     </tr>
                 </thead>
                 <tbody id="table-closed"></tbody>
