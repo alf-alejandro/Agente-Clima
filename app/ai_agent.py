@@ -9,7 +9,8 @@ from google.genai import types
 log = logging.getLogger(__name__)
 
 POSITION_PROMPT = """\
-You are a weather prediction market analyst with access to real-time data.
+You are an expert prediction market analyst specializing in weather derivatives.
+You have access to real-time web search. Use it aggressively across MULTIPLE sources.
 
 I currently hold a NO position on this Polymarket weather market:
 - City: {city}
@@ -21,33 +22,50 @@ I currently hold a NO position on this Polymarket weather market:
 
 My position profits if NO resolves (temperature does NOT exceed the threshold).
 
-Steps:
-1. Search for the LATEST weather forecast for {city} on {date}
-2. Identify the temperature threshold from the question
-3. Assess the current probability that temperature will NOT exceed the threshold
-4. Decide: EXIT now or HOLD until resolution?
+Research steps — search ALL of the following before deciding:
+1. WEATHER FORECASTS: Search at least 3 different sources for {city} on {date}:
+   - National Weather Service / official meteorological agency for {city}
+   - Weather.com, AccuWeather, Weather Underground, Wunderground, Meteoblue
+   - Local TV station forecasts or any regional forecast model (GFS, ECMWF, NAM)
+   Cross-check forecasts and note any disagreement between models.
 
-EXIT if the forecast now clearly shows temperature will exceed the threshold
-   (position likely to lose — cut losses early).
-EXIT if NO price has risen to near 0.97+ and most profit is already captured
-   (lock in gains, reduce tail risk).
-HOLD if forecast still strongly supports NO resolution and position has value.
+2. PREDICTION MARKETS: Search for the same or similar market on:
+   - Polymarket: search "polymarket {city} temperature {date}"
+   - Kalshi: search "kalshi {city} weather {date}"
+   - Note the current NO/YES prices and any price movement trends.
+   Market price movement is a strong signal — if YES is rising sharply, the crowd
+   knows something.
 
-Respond with ONLY valid JSON — no markdown, no explanation:
+3. SYNTHESIS: Identify the temperature threshold from the question.
+   Weight sources by recency and reliability. If forecasts disagree, lean toward
+   the most recent official model run.
+
+Decision rules:
+EXIT if multiple forecasts show temperature will exceed the threshold
+   (position likely to lose — cut losses before it worsens).
+EXIT if NO price has risen to 0.97+ and most profit is already locked
+   (harvest gains, eliminate remaining tail risk).
+EXIT if prediction market prices (Kalshi/Polymarket) show strong YES momentum
+   that contradicts our thesis.
+HOLD if the preponderance of forecasts and market signals still support NO.
+
+Respond with ONLY valid JSON — no markdown, no explanation outside the JSON:
 {{
-  "forecast_high": <expected high as number, null if unavailable>,
+  "forecast_high": <consensus expected high as number, null if unavailable>,
   "unit": "F" or "C",
   "threshold": <threshold from the question as number>,
-  "true_prob_no": <your current estimate 0.00 to 1.00>,
+  "sources_checked": ["list", "of", "source", "names", "actually", "searched"],
+  "market_signal": "<brief note on Polymarket/Kalshi price or 'not found'>",
+  "true_prob_no": <your synthesized estimate 0.00 to 1.00>,
   "recommendation": "EXIT" or "HOLD",
-  "reasoning": "<one sentence, max 15 words>",
+  "reasoning": "<one sentence, max 20 words>",
   "data_quality": "HIGH" or "MEDIUM" or "LOW"
 }}
 """
 
 
 class WeatherAgent:
-    def __init__(self, api_key, model="gemini-3-flash-preview"):
+    def __init__(self, api_key, model="gemini-3-pro-preview"):
         self.client = genai.Client(api_key=api_key)
         self.model = model
 
@@ -63,11 +81,12 @@ class WeatherAgent:
             result = self._parse_json(raw)
             if result:
                 log.info(
-                    "AI pos: %s → %s (true=%.2f current_no=%.2f)",
+                    "AI pos: %s → %s (true=%.2f mkt=%s quality=%s)",
                     pos.get("question", "")[:45],
                     result.get("recommendation"),
                     result.get("true_prob_no", 0),
-                    pos.get("current_no", 0),
+                    result.get("market_signal", "-")[:30],
+                    result.get("data_quality", "?"),
                 )
             return result
         except Exception:
