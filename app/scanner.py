@@ -110,7 +110,7 @@ def fetch_no_price_clob(no_token_id):
         r = requests.get(
             f"{CLOB}/book",
             params={"token_id": no_token_id},
-            timeout=(5, 8),
+            timeout=(2, 3),
         )
         if r.status_code != 200:
             return None, None

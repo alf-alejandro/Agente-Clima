@@ -141,22 +141,7 @@ class BotRunner:
             for o in opportunities[:20]
         ]
 
-        # 4a. CLOB real-time price check before entry — filter stale opportunities
-        verified_opps = []
-        for opp in opportunities:
-            no_tid = opp.get("no_token_id")
-            rt_yes, rt_no = fetch_no_price_clob(no_tid)
-            if rt_no is not None:
-                if not (MIN_NO_PRICE <= rt_no <= MAX_NO_PRICE):
-                    log.info(
-                        "CLOB check: skip %s — NO=%.1f¢ out of range",
-                        opp["question"][:35], rt_no * 100,
-                    )
-                    continue  # price moved; skip this opportunity
-                opp = {**opp, "no_price": rt_no, "yes_price": rt_yes}
-            verified_opps.append(opp)
-
-        # 4b. Fetch current prices for open positions — CLOB first, Gamma fallback
+        # 4. Fetch current prices for open positions — CLOB first, Gamma fallback
         with portfolio.lock:
             pos_data = [
                 (cid, pos.get("no_token_id"), pos.get("slug"))
@@ -176,7 +161,7 @@ class BotRunner:
         # 5. Portfolio operations (with lock — fast, no HTTP inside)
         with portfolio.lock:
             # Enter new positions (no AI gate)
-            for opp in verified_opps:
+            for opp in opportunities:
                 if not portfolio.can_open_position():
                     break
                 city = opp.get("city", "")
@@ -220,7 +205,11 @@ class BotRunner:
         log.info("Price updater stopped")
 
     def _refresh_prices(self):
-        """Fetch current YES/NO prices — CLOB real-time first, Gamma fallback."""
+        """Fetch current YES/NO prices — CLOB real-time first, Gamma fallback.
+
+        Circuit breaker: if CLOB fails twice in a row, skip it for the rest
+        of this cycle so timeouts don't pile up.
+        """
         with self.portfolio.lock:
             pos_data = [
                 (cid, pos.get("no_token_id"), pos.get("slug"))
@@ -228,18 +217,29 @@ class BotRunner:
             ]
 
         updated = 0
+        clob_ok = True          # flip to False after 2 consecutive CLOB failures
+        clob_failures = 0
+
         for cid, no_tid, slug in pos_data:
             if self._stop_event.is_set():
                 return
 
-            # Try CLOB for real-time price
-            yes_p, no_p = fetch_no_price_clob(no_tid)
-            source = "CLOB"
+            yes_p, no_p = None, None
+            source = "Gamma"
 
-            # Fall back to Gamma (~2 min cache)
+            if clob_ok and no_tid:
+                yes_p, no_p = fetch_no_price_clob(no_tid)
+                if no_p is not None:
+                    source = "CLOB"
+                    clob_failures = 0
+                else:
+                    clob_failures += 1
+                    if clob_failures >= 2:
+                        clob_ok = False
+                        log.warning("CLOB unavailable — using Gamma for remaining positions")
+
             if no_p is None:
                 yes_p, no_p = fetch_live_prices(slug)
-                source = "Gamma"
 
             if no_p is None:
                 continue
