@@ -1,7 +1,10 @@
 import threading
 import logging
 
-from app.scanner import scan_opportunities, fetch_market_live, get_prices
+from app.scanner import (
+    scan_opportunities, fetch_market_live, get_prices,
+    fetch_clob_prices, fetch_clob_midpoint,
+)
 from app.config import (
     MONITOR_INTERVAL, GEMINI_API_KEY, AI_AGENT_ENABLED,
     AI_COST_PER_CALL, POSITION_SIZE_MIN, POSITION_SIZE_MAX,
@@ -130,19 +133,28 @@ class BotRunner:
             for o in opportunities[:20]
         ]
 
-        # 4. Fetch live prices for open positions (no lock — external HTTP)
+        # 4. Fetch live prices for open positions via CLOB (real-time, no cache)
+        #    Falls back to Gamma API if token IDs are missing.
         with portfolio.lock:
-            slugs = portfolio.get_position_slugs()
+            positions_meta = [
+                (cid, pos.get("yes_token_id"), pos.get("no_token_id"), pos.get("slug"))
+                for cid, pos in portfolio.positions.items()
+            ]
 
         price_map = {}
-        for cid, slug in slugs:
+        for cid, yes_tid, no_tid, slug in positions_meta:
             if self._stop_event.is_set():
                 return
-            m = fetch_market_live(slug)
-            if m:
-                yes_p, no_p = get_prices(m)
-                if yes_p is not None and no_p is not None:
-                    price_map[cid] = (yes_p, no_p)
+            yes_p, no_p = None, None
+            if yes_tid and no_tid:
+                yes_p, no_p = fetch_clob_prices(yes_tid, no_tid)
+            if yes_p is None or no_p is None:
+                # Fallback: Gamma API (may be ~2 min cached)
+                m = fetch_market_live(slug)
+                if m:
+                    yes_p, no_p = get_prices(m)
+            if yes_p is not None and no_p is not None:
+                price_map[cid] = (yes_p, no_p)
 
         # 5. Portfolio operations (with lock — fast, no HTTP inside)
         with portfolio.lock:
@@ -191,17 +203,24 @@ class BotRunner:
         log.info("Price updater stopped")
 
     def _refresh_prices(self):
-        """Light pass: update current_no for each open position. No resolution logic."""
+        """Light pass: update current_no via CLOB API (real-time). No resolution logic."""
         with self.portfolio.lock:
-            slugs = self.portfolio.get_position_slugs()
+            positions_meta = [
+                (cid, pos.get("no_token_id"), pos.get("slug"))
+                for cid, pos in self.portfolio.positions.items()
+            ]
 
-        for cid, slug in slugs:
+        for cid, no_token_id, slug in positions_meta:
             if self._stop_event.is_set():
                 return
-            m = fetch_market_live(slug)
-            if not m:
-                continue
-            _, no_p = get_prices(m)
+            no_p = None
+            if no_token_id:
+                no_p = fetch_clob_midpoint(no_token_id)
+            if no_p is None:
+                # Fallback to Gamma API
+                m = fetch_market_live(slug)
+                if m:
+                    _, no_p = get_prices(m)
             if no_p is None:
                 continue
             with self.portfolio.lock:

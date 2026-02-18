@@ -1,11 +1,15 @@
 import requests
 import json
+import logging
 from datetime import datetime, timezone
 
 from app.config import (
     GAMMA, WEATHER_CITIES, MIN_NO_PRICE, MAX_NO_PRICE,
     MAX_YES_PRICE, MIN_VOLUME, MIN_PROFIT_CENTS,
 )
+
+CLOB = "https://clob.polymarket.com"
+log = logging.getLogger(__name__)
 
 
 def now_utc():
@@ -80,6 +84,35 @@ def fetch_market_live(slug):
     return None
 
 
+def fetch_clob_midpoint(token_id):
+    """Fetch real-time mid-point price from the CLOB API (no cache).
+    Returns float price or None on failure.
+    """
+    if not token_id:
+        return None
+    try:
+        r = requests.get(
+            f"{CLOB}/mid-point",
+            params={"token_id": token_id},
+            timeout=8,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            price = data.get("mid")
+            if price is not None:
+                return float(price)
+    except Exception:
+        log.debug("CLOB mid-point failed for token %s", token_id)
+    return None
+
+
+def fetch_clob_prices(yes_token_id, no_token_id):
+    """Fetch real-time YES and NO prices from CLOB. Falls back to None on error."""
+    yes_p = fetch_clob_midpoint(yes_token_id)
+    no_p  = fetch_clob_midpoint(no_token_id)
+    return yes_p, no_p
+
+
 def scan_opportunities(existing_ids=None):
     """Scan for NO-side weather opportunities, excluding already-held IDs."""
     if existing_ids is None:
@@ -120,6 +153,10 @@ def scan_opportunities(existing_ids=None):
             if end_dt and end_dt.date() < today:
                 continue
 
+            clob_ids = m.get("clobTokenIds") or []
+            yes_token_id = clob_ids[0] if len(clob_ids) > 0 else None
+            no_token_id  = clob_ids[1] if len(clob_ids) > 1 else None
+
             opportunities.append({
                 "condition_id": condition_id,
                 "city": city,
@@ -130,6 +167,8 @@ def scan_opportunities(existing_ids=None):
                 "end_date": end_dt.isoformat() if end_dt else None,
                 "slug": m.get("slug", ""),
                 "profit_cents": round(profit, 1),
+                "yes_token_id": yes_token_id,
+                "no_token_id": no_token_id,
             })
 
     opportunities.sort(key=lambda x: x["no_price"], reverse=True)
