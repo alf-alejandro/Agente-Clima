@@ -91,17 +91,51 @@ def fetch_market_live(slug):
 
 
 def fetch_live_prices(slug):
-    """Fetch current YES/NO prices for an open position via Gamma API.
-
-    NOTE: Gamma API caches outcomePrices roughly every 2 minutes.
-    No Polymarket public REST endpoint provides tick-level real-time prices;
-    their live feed is WebSocket-only.  The Gamma poll is the best available
-    option for a lightweight REST integration.
-    """
+    """Fetch YES/NO prices via Gamma API (~2 min cache). Used as fallback."""
     m = fetch_market_live(slug)
     if not m:
         return None, None
     return get_prices(m)
+
+
+def fetch_no_price_clob(no_token_id):
+    """Fetch real-time NO price from CLOB order book (no cache).
+
+    Uses the NO token ID stored on each position.  Returns (yes_price, no_price)
+    or (None, None) on failure.  Falls back gracefully so Gamma can be used instead.
+    """
+    if not no_token_id:
+        return None, None
+    try:
+        r = requests.get(
+            f"{CLOB}/book",
+            params={"token_id": no_token_id},
+            timeout=(5, 8),
+        )
+        if r.status_code != 200:
+            return None, None
+        data = r.json()
+
+        # Prefer last_trade_price; fall back to best bid in the order book
+        no_price = None
+        ltp = data.get("last_trade_price")
+        if ltp:
+            no_price = float(ltp)
+
+        if no_price is None:
+            bids = data.get("bids") or []
+            if bids:
+                no_price = max(float(b["price"]) for b in bids)
+
+        if no_price is None or not (0.0 < no_price < 1.0):
+            return None, None
+
+        yes_price = round(1.0 - no_price, 6)
+        return yes_price, no_price
+
+    except Exception:
+        log.debug("CLOB book fetch failed for token %s", str(no_token_id)[:20])
+        return None, None
 
 
 def scan_opportunities(existing_ids=None):

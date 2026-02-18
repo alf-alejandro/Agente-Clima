@@ -2,7 +2,10 @@ import threading
 import logging
 from datetime import datetime, timezone
 
-from app.scanner import scan_opportunities, fetch_live_prices, get_prices, fetch_market_live
+from app.scanner import (
+    scan_opportunities, fetch_live_prices, fetch_no_price_clob,
+    get_prices, fetch_market_live,
+)
 from app.config import (
     MONITOR_INTERVAL, GEMINI_API_KEY, AI_AGENT_ENABLED,
     AI_COST_PER_CALL, POSITION_SIZE_MIN, POSITION_SIZE_MAX,
@@ -138,22 +141,42 @@ class BotRunner:
             for o in opportunities[:20]
         ]
 
-        # 4. Fetch current prices for open positions (Gamma API, ~2 min cache)
+        # 4a. CLOB real-time price check before entry — filter stale opportunities
+        verified_opps = []
+        for opp in opportunities:
+            no_tid = opp.get("no_token_id")
+            rt_yes, rt_no = fetch_no_price_clob(no_tid)
+            if rt_no is not None:
+                if not (MIN_NO_PRICE <= rt_no <= MAX_NO_PRICE):
+                    log.info(
+                        "CLOB check: skip %s — NO=%.1f¢ out of range",
+                        opp["question"][:35], rt_no * 100,
+                    )
+                    continue  # price moved; skip this opportunity
+                opp = {**opp, "no_price": rt_no, "yes_price": rt_yes}
+            verified_opps.append(opp)
+
+        # 4b. Fetch current prices for open positions — CLOB first, Gamma fallback
         with portfolio.lock:
-            slugs = portfolio.get_position_slugs()
+            pos_data = [
+                (cid, pos.get("no_token_id"), pos.get("slug"))
+                for cid, pos in portfolio.positions.items()
+            ]
 
         price_map = {}
-        for cid, slug in slugs:
+        for cid, no_tid, slug in pos_data:
             if self._stop_event.is_set():
                 return
-            yes_p, no_p = fetch_live_prices(slug)
+            yes_p, no_p = fetch_no_price_clob(no_tid)
+            if no_p is None:
+                yes_p, no_p = fetch_live_prices(slug)
             if yes_p is not None and no_p is not None:
                 price_map[cid] = (yes_p, no_p)
 
         # 5. Portfolio operations (with lock — fast, no HTTP inside)
         with portfolio.lock:
             # Enter new positions (no AI gate)
-            for opp in opportunities:
+            for opp in verified_opps:
                 if not portfolio.can_open_position():
                     break
                 city = opp.get("city", "")
@@ -197,26 +220,42 @@ class BotRunner:
         log.info("Price updater stopped")
 
     def _refresh_prices(self):
-        """Fetch current YES/NO prices via Gamma API and update open positions."""
+        """Fetch current YES/NO prices — CLOB real-time first, Gamma fallback."""
         with self.portfolio.lock:
-            slugs = self.portfolio.get_position_slugs()
+            pos_data = [
+                (cid, pos.get("no_token_id"), pos.get("slug"))
+                for cid, pos in self.portfolio.positions.items()
+            ]
 
         updated = 0
-        for cid, slug in slugs:
+        for cid, no_tid, slug in pos_data:
             if self._stop_event.is_set():
                 return
-            yes_p, no_p = fetch_live_prices(slug)
+
+            # Try CLOB for real-time price
+            yes_p, no_p = fetch_no_price_clob(no_tid)
+            source = "CLOB"
+
+            # Fall back to Gamma (~2 min cache)
+            if no_p is None:
+                yes_p, no_p = fetch_live_prices(slug)
+                source = "Gamma"
+
             if no_p is None:
                 continue
+
             with self.portfolio.lock:
                 if cid in self.portfolio.positions:
                     old = self.portfolio.positions[cid]["current_no"]
                     self.portfolio.positions[cid]["current_no"] = no_p
                     if abs(no_p - old) >= 0.001:
-                        log.info("Price update %s: %.4f -> %.4f", slug[:35], old, no_p)
+                        log.info(
+                            "Price [%s] %s: %.4f → %.4f",
+                            source, slug[:30] if slug else cid[:20], old, no_p,
+                        )
                     updated += 1
 
-        if updated > 0 or not slugs:
+        if updated > 0 or not pos_data:
             self.last_price_update = datetime.now(timezone.utc)
 
     # ── AI take-profit loop (every AI_SCAN_INTERVAL seconds) ──────────────────
