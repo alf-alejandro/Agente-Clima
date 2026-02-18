@@ -28,7 +28,7 @@ REGION_MAP = {
     "chicago": "midwest",       "denver": "midwest",
     "dallas": "south",          "houston": "south",
     "atlanta": "south",         "miami": "south",         "phoenix": "south",
-    "boston": "northeast",      "new-york-city": "northeast",
+    "boston": "northeast",      "nyc": "northeast",
     "seattle": "pacific",       "los-angeles": "pacific",
     "london": "europe",         "paris": "europe",        "ankara": "europe",
     "wellington": "southern",   "buenos-aires": "southern", "sao-paulo": "southern",
@@ -48,7 +48,7 @@ GAMMA = os.environ.get("GAMMA_API", "https://gamma-api.polymarket.com")
 
 # --- Cities ---
 WEATHER_CITIES = [
-    "chicago", "dallas", "atlanta", "miami", "new-york-city",
+    "chicago", "dallas", "atlanta", "miami", "nyc",
     "seattle", "london", "wellington", "toronto", "seoul",
     "ankara", "paris", "sao-paulo", "buenos-aires",
     "los-angeles", "houston", "phoenix", "denver", "boston",
