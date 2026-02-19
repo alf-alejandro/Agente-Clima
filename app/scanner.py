@@ -181,6 +181,7 @@ def scan_opportunities(existing_ids=None):
             if not city_is_ready(city, scan_date, today):
                 continue
             slug = build_event_slug(city, scan_date)
+            event = fetch_event_by_slug(slug)
             if not event:
                 continue
 
