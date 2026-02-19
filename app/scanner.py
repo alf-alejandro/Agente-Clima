@@ -191,12 +191,13 @@ def scan_opportunities(existing_ids=None):
                 if volume < MIN_VOLUME:
                     continue
 
-                if not (MIN_NO_PRICE <= no_price <= MAX_NO_PRICE and yes_price <= MAX_YES_PRICE):
+                # Skip obviously dead markets (Gamma used only for discovery,
+                # not price decisions — CLOB in bot.py is the real price gate).
+                # Only exclude NO > 0.97 (market essentially resolved) or NO < 0.50.
+                if not (0.50 <= no_price <= 0.97):
                     continue
 
                 profit = (1.0 - no_price) * 100
-                if profit < MIN_PROFIT_CENTS:
-                    continue
 
                 end_dt = parse_date(m.get("endDate"))
                 # Skip markets strictly in the past

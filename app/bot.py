@@ -100,7 +100,7 @@ class BotRunner:
         # 3. Verify real-time entry price via CLOB (max 5 to avoid long blocking).
         #    Opportunities that CLOB confirms are out of range are dropped entirely —
         #    they won't be entered and shouldn't appear in the dashboard.
-        MAX_CLOB_VERIFY = 5
+        MAX_CLOB_VERIFY = 15
         with portfolio.lock:
             open_count = len(portfolio.positions)
 
