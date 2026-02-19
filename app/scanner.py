@@ -2,10 +2,12 @@ import requests
 import json
 import logging
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 
 from app.config import (
     GAMMA, WEATHER_CITIES, MIN_NO_PRICE, MAX_NO_PRICE,
     MAX_YES_PRICE, MIN_VOLUME, MIN_PROFIT_CENTS, SCAN_DAYS_AHEAD,
+    CITY_TIMEZONE, MIN_LOCAL_HOUR,
 )
 
 CLOB = "https://clob.polymarket.com"
@@ -49,6 +51,26 @@ def get_prices(m):
         return yes, no
     except Exception:
         return None, None
+
+
+def city_is_ready(city, scan_date, today):
+    """True si vale la pena escanear esta ciudad para scan_date.
+
+    - Hoy: siempre OK (el día ya está ocurriendo).
+    - Fecha futura: solo si la hora local en esa ciudad ya pasó MIN_LOCAL_HOUR
+      de scan_date — significa que el día está suficientemente avanzado para
+      que la temperatura no sea pura especulación.
+    """
+    if scan_date == today:
+        return True
+    tz_name = CITY_TIMEZONE.get(city)
+    if not tz_name:
+        return False
+    try:
+        local_now = datetime.now(ZoneInfo(tz_name))
+        return local_now.date() == scan_date and local_now.hour >= MIN_LOCAL_HOUR
+    except Exception:
+        return False
 
 
 def build_event_slug(city, date):
@@ -156,8 +178,9 @@ def scan_opportunities(existing_ids=None):
 
     for scan_date in scan_dates:
         for city in WEATHER_CITIES:
+            if not city_is_ready(city, scan_date, today):
+                continue
             slug = build_event_slug(city, scan_date)
-            event = fetch_event_by_slug(slug)
             if not event:
                 continue
 
