@@ -15,12 +15,12 @@ log = logging.getLogger(__name__)
 
 
 def calc_position_size(capital_total, capital_disponible, no_price):
-    """Linear scale between POSITION_SIZE_MIN and POSITION_SIZE_MAX of capital_total.
+    """Linear scale between POSITION_SIZE_MIN and POSITION_SIZE_MAX of capital_disponible.
 
     Higher no_price → higher implied probability → larger allocation.
       no_price == MIN_NO_PRICE  →  POSITION_SIZE_MIN  (5 %)
       no_price == MAX_NO_PRICE  →  POSITION_SIZE_MAX  (10 %)
-    Result is always capped at capital_disponible.
+    Always applied over available capital, not total.
     """
     price_range = MAX_NO_PRICE - MIN_NO_PRICE
     if price_range <= 0:
@@ -29,7 +29,7 @@ def calc_position_size(capital_total, capital_disponible, no_price):
         t = (no_price - MIN_NO_PRICE) / price_range
         t = max(0.0, min(1.0, t))
         pct = POSITION_SIZE_MIN + t * (POSITION_SIZE_MAX - POSITION_SIZE_MIN)
-    return min(capital_total * pct, capital_disponible)
+    return min(capital_disponible * pct, capital_disponible)
 
 
 class BotRunner:
