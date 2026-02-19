@@ -54,15 +54,12 @@ def get_prices(m):
 
 
 def city_is_ready(city, scan_date, today):
-    """True si vale la pena escanear esta ciudad para scan_date.
+    """True si en esa ciudad ya son las MIN_LOCAL_HOUR del día scan_date.
 
-    - Hoy: siempre OK (el día ya está ocurriendo).
-    - Fecha futura: solo si la hora local en esa ciudad ya pasó MIN_LOCAL_HOUR
-      de scan_date — significa que el día está suficientemente avanzado para
-      que la temperatura no sea pura especulación.
+    Siempre verifica la hora local — "hoy en UTC" no significa "hoy" en
+    ciudades con timezone negativo (ej: Buenos Aires a las 23:00 local
+    todavía está en el día anterior aunque UTC ya marcó el siguiente).
     """
-    if scan_date == today:
-        return True
     tz_name = CITY_TIMEZONE.get(city)
     if not tz_name:
         return False
