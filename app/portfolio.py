@@ -239,11 +239,13 @@ class AutoPortfolio:
         pnl = self.capital_total - self.capital_inicial
         roi = (pnl / self.capital_inicial * 100) if self.capital_inicial else 0
 
-        # Exclude PARTIAL entries from won/lost — they're not resolved positions
-        won = sum(1 for p in self.closed_positions if p["pnl"] > 0 and p["status"] != "PARTIAL")
-        lost = sum(1 for p in self.closed_positions if p["pnl"] <= 0 and p["status"] != "PARTIAL")
-        stopped = sum(1 for p in self.closed_positions if p["status"] == "STOPPED")
-        partial = sum(1 for p in self.closed_positions if p["status"] == "PARTIAL")
+        # Exclude PARTIAL and LIQUIDATED from won/lost — not resolved bets
+        exclude = {"PARTIAL", "LIQUIDATED"}
+        won  = sum(1 for p in self.closed_positions if p["pnl"] > 0  and p["status"] not in exclude)
+        lost = sum(1 for p in self.closed_positions if p["pnl"] <= 0 and p["status"] not in exclude)
+        stopped    = sum(1 for p in self.closed_positions if p["status"] == "STOPPED")
+        partial    = sum(1 for p in self.closed_positions if p["status"] == "PARTIAL")
+        liquidated = sum(1 for p in self.closed_positions if p["status"] == "LIQUIDATED")
 
         open_positions = []
         for pos in list(self.positions.values()):
@@ -283,6 +285,7 @@ class AutoPortfolio:
             "lost": lost,
             "stopped": stopped,
             "partial": partial,
+            "liquidated": liquidated,
             "open_positions": open_positions,
             "closed_positions": closed,
             "capital_history": self.capital_history,

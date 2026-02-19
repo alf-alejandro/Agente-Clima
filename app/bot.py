@@ -127,16 +127,19 @@ class BotRunner:
                     if clob_entry_fails >= 2:
                         clob_entry_ok = False
 
-            if rt_no is not None:
-                if not (MIN_NO_PRICE <= rt_no <= MAX_NO_PRICE):
-                    log.info(
-                        "Entry skip %s — CLOB price %.1f¢ out of range",
-                        opp["question"][:35], rt_no * 100,
-                    )
-                    # Price moved out of range — skip entirely (don't display)
-                    continue
-                opp = {**opp, "no_price": rt_no, "yes_price": rt_yes or round(1 - rt_no, 4)}
+            # CLOB is mandatory for entry — never fall back to Gamma prices
+            if rt_no is None:
+                display_opps.append(opp)   # show in dashboard but don't enter
+                continue
 
+            if not (MIN_NO_PRICE <= rt_no <= MAX_NO_PRICE):
+                log.info(
+                    "Entry skip %s — CLOB price %.1f¢ out of range",
+                    opp["question"][:35], rt_no * 100,
+                )
+                continue
+
+            opp = {**opp, "no_price": rt_no, "yes_price": rt_yes or round(1 - rt_no, 4)}
             verified_opps.append(opp)
             display_opps.append(opp)
 
@@ -205,6 +208,24 @@ class BotRunner:
 
             if price_map:
                 portfolio.apply_price_updates(price_map)
+
+            # Auto-liquidate positions entered outside the allowed price range
+            for cid, pos in list(portfolio.positions.items()):
+                entry_no = pos.get("entry_no", 1.0)
+                if not (MIN_NO_PRICE <= entry_no <= MAX_NO_PRICE):
+                    current_no = pos.get("current_no", entry_no)
+                    pnl = round(pos["tokens"] * current_no - pos["allocated"], 2)
+                    log.warning(
+                        "Auto-liquidate %s — entrada %.1f¢ fuera de rango permitido",
+                        pos["question"][:40], entry_no * 100,
+                    )
+                    portfolio._close_position(
+                        cid, "LIQUIDATED", pnl,
+                        resolution=(
+                            f"Auto-liquidación: entrada {entry_no*100:.1f}¢ "
+                            f"fuera del rango ({MIN_NO_PRICE*100:.0f}–{MAX_NO_PRICE*100:.0f}¢)"
+                        ),
+                    )
 
             portfolio.check_partial_exits()
             portfolio.record_capital()
