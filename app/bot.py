@@ -283,5 +283,5 @@ class BotRunner:
                         )
                     updated += 1
 
-        if updated > 0 or not pos_data:
-            self.last_price_update = datetime.now(timezone.utc)
+        # Always record when we last attempted a refresh (badge shows fetch time, not change time)
+        self.last_price_update = datetime.now(timezone.utc)
