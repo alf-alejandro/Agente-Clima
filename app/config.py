@@ -47,27 +47,30 @@ AUTO_START      = os.environ.get("AUTO_START", "false").lower() == "true"
 # --- API ---
 GAMMA = os.environ.get("GAMMA_API", "https://gamma-api.polymarket.com")
 
-# --- City timezones (IANA) — for next-day market maturity filter ---
-CITY_TIMEZONE = {
-    "chicago":      "America/Chicago",
-    "dallas":       "America/Chicago",
-    "atlanta":      "America/New_York",
-    "miami":        "America/New_York",
-    "nyc":          "America/New_York",
-    "boston":       "America/New_York",
-    "toronto":      "America/Toronto",
-    "seattle":      "America/Los_Angeles",
-    "los-angeles":  "America/Los_Angeles",
-    "houston":      "America/Chicago",
-    "phoenix":      "America/Phoenix",
-    "denver":       "America/Denver",
-    "london":       "Europe/London",
-    "paris":        "Europe/Paris",
-    "ankara":       "Europe/Istanbul",
-    "seoul":        "Asia/Seoul",
-    "wellington":   "Pacific/Auckland",
-    "sao-paulo":    "America/Sao_Paulo",
-    "buenos-aires": "America/Argentina/Buenos_Aires",
+# --- City UTC offsets — for next-day market maturity filter ---
+# Hardcoded for reliability (no system tzdata dependency).
+# NOTE: update US/EU offsets when DST changes (Mar/Nov).
+# February 2026: Northern Hemisphere = standard time; Wellington = NZDT (UTC+13).
+CITY_UTC_OFFSET = {
+    "chicago":      -6,
+    "dallas":       -6,
+    "atlanta":      -5,
+    "miami":        -5,
+    "nyc":          -5,
+    "boston":       -5,
+    "toronto":      -5,
+    "seattle":      -8,
+    "los-angeles":  -8,
+    "houston":      -6,
+    "phoenix":      -7,
+    "denver":       -7,
+    "london":        0,
+    "paris":         1,
+    "ankara":        3,
+    "seoul":         9,
+    "wellington":   13,
+    "sao-paulo":    -3,
+    "buenos-aires": -3,
 }
 
 # --- Cities ---

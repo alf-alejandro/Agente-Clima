@@ -2,12 +2,11 @@ import requests
 import json
 import logging
 from datetime import datetime, timezone, timedelta
-from zoneinfo import ZoneInfo
 
 from app.config import (
     GAMMA, WEATHER_CITIES, MIN_NO_PRICE, MAX_NO_PRICE,
     MAX_YES_PRICE, MIN_VOLUME, MIN_PROFIT_CENTS, SCAN_DAYS_AHEAD,
-    CITY_TIMEZONE, MIN_LOCAL_HOUR,
+    CITY_UTC_OFFSET, MIN_LOCAL_HOUR,
 )
 
 CLOB = "https://clob.polymarket.com"
@@ -56,18 +55,15 @@ def get_prices(m):
 def city_is_ready(city, scan_date, today):
     """True si en esa ciudad ya son las MIN_LOCAL_HOUR del día scan_date.
 
-    Siempre verifica la hora local — "hoy en UTC" no significa "hoy" en
-    ciudades con timezone negativo (ej: Buenos Aires a las 23:00 local
-    todavía está en el día anterior aunque UTC ya marcó el siguiente).
+    Usa offsets UTC hardcodeados (sin tzdata del sistema) para máxima
+    fiabilidad en Railway. Siempre verifica la hora local — "hoy en UTC"
+    no significa "hoy" en ciudades con offset negativo.
     """
-    tz_name = CITY_TIMEZONE.get(city)
-    if not tz_name:
+    offset = CITY_UTC_OFFSET.get(city)
+    if offset is None:
         return False
-    try:
-        local_now = datetime.now(ZoneInfo(tz_name))
-        return local_now.date() == scan_date and local_now.hour >= MIN_LOCAL_HOUR
-    except Exception:
-        return False
+    local_now = now_utc() + timedelta(hours=offset)
+    return local_now.date() == scan_date and local_now.hour >= MIN_LOCAL_HOUR
 
 
 def build_event_slug(city, date):
