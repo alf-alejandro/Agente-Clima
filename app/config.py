@@ -8,7 +8,7 @@ MIN_VOLUME        = float(os.environ.get("MIN_VOLUME", 200))
 MIN_PROFIT_CENTS  = float(os.environ.get("MIN_PROFIT_CENTS", 5.0))
 MONITOR_INTERVAL  = int(os.environ.get("MONITOR_INTERVAL", 30))
 SCAN_DAYS_AHEAD   = int(os.environ.get("SCAN_DAYS_AHEAD", 1))   # 0 = solo hoy, 1 = hoy + mañana
-MIN_LOCAL_HOUR    = int(os.environ.get("MIN_LOCAL_HOUR", 9))    # hora mínima local para mercados futuros
+MIN_LOCAL_HOUR    = int(os.environ.get("MIN_LOCAL_HOUR", 14))   # hora mínima local para mercados futuros
 MAX_POSITIONS     = int(os.environ.get("MAX_POSITIONS", 20))
 MAX_HOURS_TO_CLOSE = int(os.environ.get("MAX_HOURS_TO_CLOSE", 8))
 
